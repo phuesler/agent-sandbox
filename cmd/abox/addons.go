@@ -260,7 +260,7 @@ func cmdAddon(a *App) error {
 		if len(list) == 0 {
 			list = pr.Addons
 		}
-		if err := a.ensureUp(name); err != nil {
+		if err := a.ensure(name, agentsSkip); err != nil { // start only; the update below installs
 			return err
 		}
 		return e.AddonInstall(name, list, true)

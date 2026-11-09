@@ -368,8 +368,8 @@ func TestBrowserAddon(t *testing.T) {
 		t.Fatalf("browser add-on: %+v", b)
 	}
 	allow, _, err := c.buildAllowlist()
-	if err != nil || !strings.Contains(allow, "cdn.playwright.dev") || !strings.Contains(allow, "playwright.download.prss.microsoft.com") {
-		t.Errorf("allowlist lacks playwright hosts: %v", err)
+	if err != nil || !strings.Contains(allow, "dl.google.com") || strings.Contains(allow, "storage.googleapis.com") {
+		t.Errorf("allowlist must contain dl.google.com and not storage.googleapis.com: %v", err)
 	}
 	if c.CheckAddons([]string{"browser"}) != nil || c.CheckAddons([]string{"nope"}) == nil {
 		t.Error("CheckAddons")

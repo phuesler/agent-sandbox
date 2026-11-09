@@ -48,7 +48,7 @@ abox agents               # available agents, which this project uses, how each 
 abox agent add opencode   # enable + install more agents; agent rm / default / update
 abox secret set OPENAI_API_KEY ~/.secrets/openai      # env var in the sandbox (value stays in the host file)
 abox ls                   # all projects: agents, state, IP, egress (open/allowlist), snapshots
-abox addon add browser    # headless Chromium the agents can drive (see "Web apps" below)
+abox addon add browser    # headless Chrome the agents can drive (see "Web apps" below)
 abox port 3000            # http://localhost:3000 on this machine -> port 3000 in the sandbox
 abox shell | root         # shell in the sandbox (same subdir) | root shell
 abox exec -- make test    # one-off command in the sandbox
@@ -105,13 +105,13 @@ Create `agents/<name>/` with three files (see `agents/README.md`), rebuild with 
 Agents can check their own work in a real browser, and you can watch the same app from your machine:
 
 ```bash
-abox addon add browser    # headless Chromium + Playwright MCP server, registered with every agent
+abox addon add browser    # headless Chrome + Playwright MCP server, registered with every agent
 abox port 3000            # http://localhost:3000 here -> the dev server in the sandbox
 abox port 8080:3000       # different host port
 abox port                 # list; abox port rm 3000 to stop
 ```
 
-- **Browser add-on:** installs Chromium and the [Playwright MCP server](https://github.com/microsoft/playwright-mcp) inside the sandbox and registers it as `playwright` with Claude, Codex, Gemini and opencode. That includes agents you add later. Agents can then navigate, click, fill in forms, read the page and take screenshots. The browser is headless and keeps no profile. It reaches the app under test on `localhost` directly. Every other site goes through the egress proxy, so the allowlist applies: an app that loads fonts or scripts from a CDN may need `abox net open` or extra allowlist entries.
+- **Browser add-on:** installs Google Chrome (run headless; from `dl.google.com`, the only extra allowlist entry) and the [Playwright MCP server](https://github.com/microsoft/playwright-mcp) inside the sandbox and registers it as `playwright` with Claude, Codex, Gemini and opencode. That includes agents you add later. Agents can then navigate, click, fill in forms, read the page and take screenshots. The browser is headless and keeps no profile. It reaches the app under test on `localhost` directly. Every other site goes through the egress proxy, so the allowlist applies: an app that loads fonts or scripts from a CDN may need `abox net open` or extra allowlist entries.
 - **Port forwarding:** an Incus proxy device listening on `127.0.0.1` only, so it's never exposed to your LAN. In containers, the app can listen on `localhost`. In VMs, the forward goes to the VM's address, which `abox` pins, so the app must listen on `0.0.0.0`. Forwards are stored with the project and restored after `restore`/`rebuild`.
 - Add-ons are not available for NixOS sandboxes yet.
 

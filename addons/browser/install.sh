@@ -1,32 +1,32 @@
 #!/bin/bash
 # Runs inside the sandbox as the agent user (login shell: proxy env set).
-# Installs headless Chromium + the Playwright MCP server and registers the
+# Installs Google Chrome (used headless) + the Playwright MCP server and registers the
 # server ("playwright") with every installed agent. Re-run by abox whenever an
 # agent is added, so keep it idempotent and quick when nothing changed.
 set -euo pipefail
 MCP_PKG=@playwright/mcp
-PW_CLI=$HOME/.local/lib/node_modules/@playwright/mcp/node_modules/playwright/cli.js
+CHROME_DEB=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+log=/tmp/abox-browser-install.log
 
 if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v playwright-mcp >/dev/null; then
   sudo /usr/local/lib/abox/ensure-node
   npm install -g --prefix "$HOME/.local" "$MCP_PKG@latest"
 fi
-if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! ls "$HOME"/.cache/ms-playwright/chromium_headless_shell-* >/dev/null 2>&1; then
-  log=/tmp/abox-browser-install.log
-  # quiet: a blocked download makes Playwright print whole proxy error pages
-  if ! node "$PW_CLI" install chromium >"$log" 2>&1; then
-    grep -E "Error|error:" "$log" | grep -v -E "^\s*[#/<]" | head -3
-    echo "Chromium download failed (full log: $log). Blocked hosts: abox net log" >&2
-    exit 1
+# Google Chrome stable from dl.google.com (Playwright's Chromium builds are served
+# from storage.googleapis.com, which would open all of Google Cloud Storage to
+# every sandbox). The package also adds Google's apt repo for updates.
+if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v google-chrome >/dev/null; then
+  if ! curl -fsSL -o /tmp/google-chrome.deb "$CHROME_DEB" 2>"$log"; then
+    cat "$log" >&2; echo "Chrome download failed. Blocked hosts: abox net log" >&2; exit 1
   fi
-  # system libraries for Chromium (apt, via the sandbox proxy)
-  sudo env "PATH=$PATH" "http_proxy=${http_proxy:-}" "https_proxy=${https_proxy:-}" node "$PW_CLI" install-deps chromium >>"$log" 2>&1 \
-    || { tail -5 "$log"; exit 1; }
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb >>"$log" 2>&1 \
+    || { tail -5 "$log" >&2; exit 1; }
+  rm -f /tmp/google-chrome.deb
 fi
 
 # Headless, in-memory profile; external pages go through the egress proxy
 # (allowlist applies), the app under test on localhost is reached directly.
-args=(--headless --isolated --browser chromium --output-dir /tmp/playwright-mcp)
+args=(--headless --isolated --browser chrome --output-dir /tmp/playwright-mcp)
 if [[ -n ${https_proxy:-} ]]; then
   args+=(--proxy-server "$https_proxy" --proxy-bypass "localhost,127.0.0.1,::1")
 fi

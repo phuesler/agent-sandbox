@@ -1,3 +1,2 @@
-# Playwright browser downloads
-cdn.playwright.dev
-playwright.download.prss.microsoft.com
+# Google Chrome package and its apt repository (system libraries come from the Ubuntu archive)
+dl.google.com
