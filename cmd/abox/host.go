@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -25,7 +24,6 @@ type hostFile struct {
 }
 
 // hostFiles renders everything `abox host apply` installs (pure; tested).
-// The 192.0.2.1 (TEST-NET) placeholder keeps squid's open_clients ACL non-empty.
 func hostFiles(c *Config, sudoUser string) ([]hostFile, []string, error) {
 	allow, agents, err := c.buildAllowlist()
 	if err != nil {
@@ -33,10 +31,9 @@ func hostFiles(c *Config, sudoUser string) ([]hostFile, []string, error) {
 	}
 	r := func(p string) string { return c.render(asset(p), 0) }
 	files := []hostFile{
-		{"/etc/abox/squid.conf", r("egress/squid.conf.in"), 0o644},
 		{"/etc/abox/egress.nft", r("egress/egress.nft.in"), 0o644},
-		{"/etc/abox/allowlist.squid", allow, 0o644},
-		{"/etc/abox/open-clients", "# managed by abox-net\n192.0.2.1\n", 0o644},
+		{"/etc/abox/allowlist.txt", allow, 0o644},
+		{"/etc/abox/open-clients", "# managed by abox-net\n", 0o644},
 		{"/usr/local/sbin/abox-net", r("egress/abox-net.in"), 0o755},
 		{"/usr/local/lib/abox/docker-user.sh", r("systemd/docker-user.sh.in"), 0o755},
 		{"/etc/systemd/system/abox-egress.service", asset("systemd/abox-egress.service"), 0o644},
@@ -95,15 +92,44 @@ func sudoUser() string {
 
 func runCmd(name string, args ...string) error { return runIO(name, args...) }
 
-// hostApply (re)installs the egress layer: nftables firewall, squid allowlist
-// proxy, abox-net helper + sudoers rule, systemd units. Idempotent; closes all
-// temporarily opened sandboxes.
+const proxyBinary = "/usr/local/lib/abox/abox" // root-owned copy run by abox-proxy.service
+
+// legacy files of the squid-based egress proxy (before the built-in filter)
+var legacyHostFiles = []string{"/etc/abox/squid.conf", "/etc/abox/allowlist.squid"}
+
+// installProxyBinary copies the running abox binary to a root-owned location,
+// so the service never executes a user-writable file.
+func installProxyBinary() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(proxyBinary), 0o755); err != nil {
+		return err
+	}
+	tmp := proxyBinary + ".new"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chown(tmp, 0, 0); err != nil {
+		return err
+	}
+	return os.Rename(tmp, proxyBinary)
+}
+
+// hostApply (re)installs the egress layer: nftables firewall + redirects, the
+// built-in egress filter (abox-proxy.service), abox-net helper + sudoers rule,
+// systemd units. Idempotent; closes all temporarily opened sandboxes.
 func hostApply(e *Env) error {
 	if err := requireRoot(); err != nil {
 		return err
-	}
-	if _, err := exec.LookPath("squid"); err != nil {
-		return errors.New("squid is not installed (run: sudo abox host install)")
 	}
 	if _, err := os.Stat(systemConfigPath()); errors.Is(err, os.ErrNotExist) {
 		if err := writeHostFiles("/", []hostFile{{systemConfigPath(), asset("config.env"), 0o644}}); err != nil {
@@ -115,17 +141,23 @@ func hostApply(e *Env) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/var/log/abox-proxy", 0o755); err != nil {
-		return err
-	}
-	if pu, err := user.Lookup("proxy"); err == nil {
-		uid, _ := strconv.Atoi(pu.Uid)
-		gid, _ := strconv.Atoi(pu.Gid)
-		_ = os.Chown("/var/log/abox-proxy", uid, gid)
+	if _, err := user.Lookup("abox-proxy"); err != nil {
+		if err := runCmd("useradd", "--system", "--user-group", "--no-create-home", "--home-dir", "/nonexistent",
+			"--shell", "/usr/sbin/nologin", "--comment", "abox egress filter", "abox-proxy"); err != nil {
+			return err
+		}
 	}
 	info("installing egress layer (config: %s)", e.Cfg.Source)
+	if err := installProxyBinary(); err != nil {
+		return fmt.Errorf("installing %s: %v", proxyBinary, err)
+	}
 	if err := writeHostFiles("/", files); err != nil {
 		return err
+	}
+	for _, f := range legacyHostFiles {
+		if err := os.Remove(f); err == nil {
+			info("removed legacy squid file %s", f)
+		}
 	}
 	info("allowlist: base + agents: %s", strings.Join(agents, ", "))
 	if u := sudoUser(); u != "" {
@@ -142,7 +174,6 @@ func hostApply(e *Env) error {
 	steps := [][]string{
 		{"systemctl", "daemon-reload"},
 		{"nft", "-c", "-f", "/etc/abox/egress.nft"},
-		{"squid", "-k", "parse", "-f", "/etc/abox/squid.conf"},
 		{"systemctl", "enable", "--quiet", "abox-egress.service", "abox-proxy.service"},
 		{"systemctl", "restart", "abox-egress.service"},
 		{"systemctl", "restart", "abox-proxy.service"},
@@ -151,6 +182,11 @@ func hostApply(e *Env) error {
 		if out, err := exec.Command(s[0], s[1:]...).CombinedOutput(); err != nil {
 			return fmt.Errorf("%s failed: %v\n%s", strings.Join(s, " "), err, lastLines(string(out), 15))
 		}
+	}
+	time.Sleep(time.Second)
+	if out, _, _ := capture("systemctl", "is-active", "abox-proxy.service"); strings.TrimSpace(out) != "active" {
+		logs, _, _ := capture("journalctl", "-u", "abox-proxy.service", "-n", "15", "--no-pager")
+		return fmt.Errorf("abox-proxy.service did not start:\n%s", logs)
 	}
 	if out, _, _ := capture("systemctl", "is-active", "docker"); strings.TrimSpace(out) == "active" {
 		_, _, _ = capture("/usr/local/lib/abox/docker-user.sh")
@@ -219,7 +255,7 @@ func installZabbly() error {
 	})
 }
 
-// hostInstall: one-time setup of Incus (+ storage pool and bridge), squid and
+// hostInstall: one-time setup of Incus (+ storage pool and bridge) and
 // the egress layer. Leaves the host's Docker alone except for two DOCKER-USER
 // accept rules for the sandbox bridge.
 func hostInstall(e *Env, distroIncus bool) error {
@@ -255,11 +291,11 @@ func hostInstall(e *Env, distroIncus bool) error {
 		out, _, _ := capture("incus", "--version")
 		info("incus already installed: %s", strings.TrimSpace(out))
 	}
-	info("installing squid, nftables, btrfs-progs")
-	if err := runCmd("apt-get", "install", "-y", "squid", "nftables", "btrfs-progs"); err != nil {
+	info("installing nftables, btrfs-progs")
+	if err := runCmd("apt-get", "install", "-y", "nftables", "btrfs-progs"); err != nil {
 		return err
 	}
-	// abox runs its own squid instance (abox-proxy.service); the distro one would grab the port
+	// older abox versions installed squid; keep its distro service from grabbing port 3128
 	_, _, _ = capture("systemctl", "disable", "--now", "squid.service")
 	_, _, _ = capture("systemctl", "mask", "squid.service")
 	if _, _, err := capture("systemctl", "enable", "--now", "incus.socket", "incus.service"); err != nil {

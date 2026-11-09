@@ -266,7 +266,7 @@ func TestHostFilesParity(t *testing.T) {
 			continue
 		}
 		got, wantS := f.Content, string(want)
-		if filepath.Base(f.Path) == "allowlist.squid" { // order/header differ (locale sort): compare as sets
+		if filepath.Base(f.Path) == "allowlist.txt" { // order/header differ (locale sort): compare as sets
 			got, wantS = strings.Join(pruneDomains(got), "\n"), strings.Join(pruneDomains(wantS), "\n")
 		}
 		if got != wantS {

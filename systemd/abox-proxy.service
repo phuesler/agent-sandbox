@@ -1,15 +1,45 @@
 [Unit]
-Description=Agent sandbox egress proxy (squid, domain allowlist)
+Description=Agent sandbox egress filter (abox: domain allowlist, explicit + transparent)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/usr/sbin/squid -k parse -f /etc/abox/squid.conf
-ExecStart=/usr/sbin/squid -N -f /etc/abox/squid.conf
-ExecReload=/usr/sbin/squid -k reconfigure -f /etc/abox/squid.conf
+# Root-owned copy installed by `abox host apply` (never the user's build).
+ExecStart=/usr/local/lib/abox/abox _proxy
+ExecReload=/bin/kill -HUP $MAINPID
+Environment=ABOX_CONFIG=/etc/abox/config.env
 Restart=on-failure
-RestartSec=3
+RestartSec=2
+User=abox-proxy
+Group=abox-proxy
+UMask=0022
+LogsDirectory=abox-proxy
+LogsDirectoryMode=0755
+# Listens only on the bridge address (IP_FREEBIND, so the bridge may appear later).
+# Needs no privileges at all: ports > 1024, outbound TCP and DNS.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/abox
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
 
 [Install]
 WantedBy=multi-user.target

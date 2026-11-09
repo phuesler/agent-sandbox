@@ -162,6 +162,7 @@ func init() {
 		"host":       {run: cmdHost, usage: "host install [--distro-incus] | host apply   (run with sudo)", help: "set up this machine (Incus, egress proxy/firewall); needs sudo", flags: []string{"--distro-incus"}, minPos: 1, maxPos: 1, noRegistry: true},
 		"_names":     {run: cmdNames},
 		"_agents":    {run: cmdAgentNames},
+		"_proxy":     {run: cmdProxy, noRegistry: true}, // abox-proxy.service
 	}
 }
 

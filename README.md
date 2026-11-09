@@ -13,7 +13,7 @@ host (Ubuntu 24.04)
 ├── incus ── aboxbr0 10.88.0.0/24 ──┬── sandbox A (container)  /work ← ~/code/proj-a   agents: claude, codex
 │                                  └── sandbox B (VM)         /work ← ~/code/proj-b   agents: opencode
 │                                        └── dockerd → compose networks, netem, ...
-├── squid  10.88.0.1:3128   domain allowlist (base + enabled agents), logs denials
+├── abox egress filter  10.88.0.1:3128-3130  hostname allowlist (explicit proxy + transparent HTTPS/HTTP), logs denials
 └── nftables table inet abox forward: drop everything except per-IP "open" set
                             input:   only DNS, DHCP, proxy from the bridge
 ```
@@ -23,14 +23,14 @@ host (Ubuntu 24.04)
 ```bash
 make install                    # builds bin/abox (Go 1.24, see .tool-versions) and links ~/.local/bin/abox
                                 # no Go? make docker-build link
-sudo abox host install          # Incus from Zabbly (or --distro-incus), squid, egress firewall
+sudo abox host install          # Incus from Zabbly (or --distro-incus), egress filter + firewall
 newgrp incus-admin              # or log out/in
 abox doctor
 ```
 
 `abox` is a single static binary with no runtime dependencies. Everything it needs is built in: the agent plugins, Incus profiles, egress and systemd templates, and default settings. Copy it anywhere; the repo is only needed to build it.
 
-`sudo abox host install` installs Incus, squid and nftables, creates the storage pool and the `aboxbr0` bridge, and sets up the egress layer. It also writes the settings to `/etc/abox/config.env`. That file is root-owned, so nothing in a sandbox can change it. After editing it, or after rebuilding with a changed allowlist or new agents, run `sudo abox host apply`.
+`sudo abox host install` installs Incus and nftables, creates the storage pool and the `aboxbr0` bridge, and sets up the egress layer. It also writes the settings to `/etc/abox/config.env`. That file is root-owned, so nothing in a sandbox can change it. After editing it, or after rebuilding with a changed allowlist or new agents, run `sudo abox host apply`.
 
 Host Docker keeps running untouched. The only change is two `DOCKER-USER` accept rules for `aboxbr0`. Docker's `FORWARD DROP` policy would otherwise break Incus networking.
 
@@ -140,12 +140,13 @@ Both run the same Docker/Compose stack. Copy `examples/netsim` into a project an
 
 ## Egress
 
-- Guests get `http(s)_proxy` (login shells, apt, dockerd, npm), set to `http://10.88.0.1:3128`. Direct connections are dropped. Private (RFC 1918), link-local and CGNAT ranges (LAN, most VPN overlays) are blocked even when a sandbox is open.
+- Sandbox HTTPS (port 443) and HTTP (port 80) is redirected by nftables to the **abox egress filter** on the host. The filter reads the hostname from the TLS handshake (SNI, nothing is decrypted) or the HTTP `Host` header, checks it against the allowlist, and connects out by that name. This also works for containers inside the sandbox and for tools that ignore proxy settings. Guests additionally get `http(s)_proxy=http://10.88.0.1:3128`, the same filter as an explicit proxy. All other direct connections are dropped.
+- The filter refuses destinations that resolve to private, loopback, link-local or CGNAT addresses, even for allowlisted names, which prevents DNS rebinding into your LAN. It runs as an unprivileged system user and listens on the bridge address only; nftables additionally drops its ports on every other interface. Private (RFC 1918), link-local and CGNAT ranges are blocked even when a sandbox is open.
 - The allowlist is `egress/allowlist.txt` plus `agents/*/allowlist.txt` for the agents in `ABOX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). `abox host apply` merges the lists and drops overlapping entries. The allowlist is global, not per sandbox: a sandbox with only Claude can still reach the OpenAI API if Codex is enabled on the host.
 - `abox net log` lists blocked destinations per sandbox. Add what you need to the allowlist, rebuild, then run `sudo abox host apply`. Re-applying closes any open sandboxes.
-- `abox net open 20` gives the sandbox unrestricted internet for 20 minutes, both through the proxy and directly. `abox net close` ends it early.
-- **Containers inside the sandbox don't inherit the proxy.** Compose services that need the internet during build or run need `HTTP(S)_PROXY` set explicitly, or use `net open`. Image pulls work, because dockerd uses the proxy.
-- Known residual channels: DNS queries (the bridge resolver forwards upstream) and allowlisted shared hosts such as `.githubusercontent.com` and `.openai.com`.
+- `abox net open 20` gives the sandbox unrestricted internet for 20 minutes (the redirect is skipped and direct connections are allowed). `abox net close` ends it early.
+- QUIC (HTTP/3 over UDP) and non-HTTP protocols such as git over SSH are not filtered by name and stay blocked; clients fall back to HTTPS over TCP, or use `abox net open`.
+- Known residual channels: DNS queries (the bridge resolver forwards upstream), allowlisted shared hosts such as `.githubusercontent.com` and `.openai.com`, and domain fronting on CDNs that still allow it (the hostname is checked, the encrypted request inside is not).
 
 ## NixOS (experimental)
 
@@ -159,13 +160,13 @@ abox add ~/code/proj --image nixos [--vm] --agent claude,codex
 
 | path | purpose |
 |---|---|
-| `cmd/abox/` | `abox` source: CLI, registry, Incus operations (`sandbox.go`), host setup (`host.go`) |
+| `cmd/abox/` | `abox` source: CLI, registry, Incus operations (`sandbox.go`), host setup (`host.go`), egress filter (`proxy.go`) |
 | `assets.go` | embeds the directories below into the binary |
 | `config.env` | default settings (copied to `/etc/abox/config.env` by `host install`) |
 | `agents/<name>/` | agent plugins: `agent.conf`, `install.sh`, `allowlist.txt` |
 | `addons/<name>/` | add-ons (e.g. `browser`): `addon.conf`, `install.sh`, `allowlist.txt` |
 | `profiles/*.yaml` | Incus profiles (reloaded whenever a sandbox is created; limit changes apply to existing sandboxes) |
-| `egress/` | base allowlist, squid + nftables templates, `abox-net` root helper (target of the sudo rule) |
+| `egress/` | base allowlist, nftables template (firewall + transparent redirects), `abox-net` root helper (target of the sudo rule) |
 | `systemd/` | `abox-egress.service`, `abox-proxy.service`, Docker/Incus forward fix, logrotate |
 | `nixos/abox.nix` | NixOS module for `--image nixos` |
 | `examples/netsim/` | Compose networking smoke test |

@@ -29,7 +29,7 @@ Arguments after `abox <agent> --` are appended to the start command.
 
 ## `allowlist.txt`
 
-Domains the agent needs for installing, updating and talking to its API, in squid `dstdomain` format (`.example.com` = domain plus subdomains). They are merged into the global egress allowlist for agents listed in `ABOX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). After adding or changing one, rebuild and run `sudo abox host apply`. To find what an agent needs, try installing it (`abox agent add <name>`) without opening egress, read the blocked hosts from `abox net log`, add them, and repeat. `net log` only shows denied requests.
+Domains the agent needs for installing, updating and talking to its API, one per line (`.example.com` = domain plus subdomains, `example.com` = only that host). They are merged into the global egress allowlist for agents listed in `ABOX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). After adding or changing one, rebuild and run `sudo abox host apply`. To find what an agent needs, try installing it (`abox agent add <name>`) without opening egress, read the blocked hosts from `abox net log`, add them, and repeat. `net log` only shows denied requests.
 
 ## Example: aider (untested sketch)
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -831,6 +832,17 @@ func cmdDoctor(a *App) error {
 		check(unit+".service active", strings.TrimSpace(out) == "active",
 			fmt.Sprintf("sudo systemctl status %s; sudo abox host apply", unit))
 	}
+	if e != nil {
+		bad := proxyListenersOutsideBridge(e.Cfg)
+		check("egress filter listens on the bridge address only", len(bad) == 0,
+			"unexpected listeners: "+strings.Join(bad, ", ")+" (sudo abox host apply)")
+		same, err := sameFile(proxyBinary)
+		hint := "sudo abox host apply   (updates " + proxyBinary + ")"
+		if err != nil {
+			hint = proxyBinary + " not installed: sudo abox host apply"
+		}
+		check("installed egress filter matches this abox", err == nil && same, hint)
+	}
 	check("abox-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
 
 	if envErr == nil && insts != nil {
@@ -951,4 +963,50 @@ _abox() {
 complete -F _abox abox
 `, strings.Join(commandOrder, " "))
 	return nil
+}
+
+// proxyListenersOutsideBridge lists sockets on the filter's ports bound to
+// anything but the bridge address (e.g. 0.0.0.0, [::], a LAN address).
+func proxyListenersOutsideBridge(c *Config) []string {
+	out, _, err := capture("ss", "-Hltn")
+	if err != nil {
+		return nil
+	}
+	ports := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		ports[strconv.Itoa(c.proxyPort()+i)] = true
+	}
+	var bad []string
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 4 {
+			continue
+		}
+		local := f[3]
+		i := strings.LastIndex(local, ":")
+		if i < 0 || !ports[local[i+1:]] {
+			continue
+		}
+		if host := strings.Trim(local[:i], "[]"); host != c.HostIP() {
+			bad = append(bad, local)
+		}
+	}
+	return bad
+}
+
+// sameFile reports whether path has the same content as the running binary.
+func sameFile(path string) (bool, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	a, err := os.ReadFile(exe)
+	if err != nil {
+		return false, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(a, b), nil
 }

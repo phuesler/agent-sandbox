@@ -542,7 +542,7 @@ type denial struct {
 	Count     int
 }
 
-// parseDenials summarizes squid access-log lines with DENIED results.
+// parseDenials summarizes egress filter log lines (squid-style format) with DENIED results.
 func parseDenials(lines []string, names map[string]string) []denial {
 	counts := map[[2]string]int{}
 	for _, l := range lines {

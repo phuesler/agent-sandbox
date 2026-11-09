@@ -36,6 +36,7 @@ type Config struct {
 func (c *Config) HostIP() string   { return c.NetPrefix + ".1" }
 func (c *Config) ProxyURL() string { return "http://" + c.HostIP() + ":" + c.ProxyPort }
 func (c *Config) IPPrefix() string { return c.NetPrefix + "." }
+func (c *Config) proxyPort() int   { p, _ := strconv.Atoi(c.ProxyPort); return p }
 
 const noProxy = "localhost,127.0.0.1,::1,.local,.internal,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
@@ -93,6 +94,8 @@ func (c *Config) render(tmpl string, uid int) string {
 		"@ABOX_NET_PREFIX@", c.NetPrefix,
 		"@ABOX_HOST_IP@", c.HostIP(),
 		"@ABOX_PROXY_PORT@", c.ProxyPort,
+		"@ABOX_PROXY_TLS_PORT@", strconv.Itoa(c.proxyPort()+1),
+		"@ABOX_PROXY_HTTP_PORT@", strconv.Itoa(c.proxyPort()+2),
 		"@ABOX_PROXY_URL@", c.ProxyURL(),
 		"@ABOX_NO_PROXY@", noProxy,
 		"@ABOX_POOL@", c.Pool,
@@ -203,7 +206,7 @@ func (c *Config) CheckAgents(names []string) error {
 // ---------------------------------------------------------------- egress allowlist
 
 // buildAllowlist merges the base allowlist and the enabled agents' lists and
-// prunes entries covered by a wildcard (squid refuses "quay.io" + ".quay.io").
+// prunes entries covered by a wildcard (e.g. "quay.io" next to ".quay.io").
 func (c *Config) buildAllowlist() (string, []string, error) {
 	enabled := c.AgentsEnabled
 	if len(enabled) == 0 {

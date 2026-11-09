@@ -1,6 +1,8 @@
 #!/usr/sbin/nft -f
 # Rendered to /etc/abox/egress.nft by `abox host apply`, loaded by abox-egress.service.
-# Guests on @ABOX_BRIDGE@ may only talk to: each other, the host's DNS/DHCP, and the proxy.
+# Guests on @ABOX_BRIDGE@ may only talk to: each other, the host's DNS/DHCP, and the
+# abox egress filter (abox-proxy.service). Their outgoing HTTPS/HTTP is redirected
+# to the filter transparently, which checks the hostname against the allowlist.
 # `abox net open` adds a guest IP to @open4 (with timeout) to allow direct internet access.
 
 table inet abox
@@ -18,17 +20,31 @@ table inet abox {
     elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 }
   }
 
+  # Transparent filtering: sandbox HTTPS/HTTP goes to the egress filter on the
+  # bridge address (open sandboxes and traffic to private ranges are exempt).
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+    iifname "@ABOX_BRIDGE@" ip saddr @open4 return
+    iifname "@ABOX_BRIDGE@" ip daddr @private4 return
+    iifname "@ABOX_BRIDGE@" tcp dport 443 redirect to :@ABOX_PROXY_TLS_PORT@
+    iifname "@ABOX_BRIDGE@" tcp dport 80 redirect to :@ABOX_PROXY_HTTP_PORT@
+  }
+
   chain input {
     type filter hook input priority filter - 10; policy accept;
     iifname "@ABOX_BRIDGE@" ct state established,related accept
     iifname "@ABOX_BRIDGE@" meta l4proto { icmp, ipv6-icmp } accept
     iifname "@ABOX_BRIDGE@" udp dport { 53, 67 } accept
-    iifname "@ABOX_BRIDGE@" tcp dport { 53, @ABOX_PROXY_PORT@ } accept
+    iifname "@ABOX_BRIDGE@" tcp dport { 53, @ABOX_PROXY_PORT@, @ABOX_PROXY_TLS_PORT@, @ABOX_PROXY_HTTP_PORT@ } accept
     iifname "@ABOX_BRIDGE@" counter drop
+    # Backstop: the filter listens on the bridge address only; never let LAN/VPN
+    # peers reach its ports, even if a route to the bridge address exists.
+    iifname != { "@ABOX_BRIDGE@", "lo" } tcp dport { @ABOX_PROXY_PORT@, @ABOX_PROXY_TLS_PORT@, @ABOX_PROXY_HTTP_PORT@ } counter drop
   }
 
   chain forward {
     type filter hook forward priority filter - 10; policy accept;
+    # QUIC/HTTP3 can't be filtered by hostname here; clients fall back to TCP
     iifname "@ABOX_BRIDGE@" oifname "@ABOX_BRIDGE@" accept
     iifname "@ABOX_BRIDGE@" ip daddr @private4 counter drop
     iifname "@ABOX_BRIDGE@" ip saddr @open4 accept

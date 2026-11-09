@@ -1,4 +1,4 @@
-# Domains sandboxes may reach through the egress proxy (squid dstdomain format).
+# Domains sandboxes may reach through the abox egress filter.
 #   .example.com   -> example.com and all subdomains
 #   example.com    -> exactly that host
 # Overlapping entries are pruned automatically.
