@@ -1,4 +1,4 @@
-# Rendered to /etc/sbx/squid.conf by egress/apply.sh. Runs as sbx-proxy.service.
+# Rendered to /etc/sbx/squid.conf by `abox host apply`. Runs as sbx-proxy.service.
 http_port @SBX_PROXY_PORT@
 pid_filename /run/sbx-proxy.pid
 cache_effective_user proxy

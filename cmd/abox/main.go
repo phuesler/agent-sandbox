@@ -61,7 +61,7 @@ var (
 	valueFlags = map[string]bool{"--project": true, "--name": true, "--image": true, "--cpus": true,
 		"--memory": true, "--disk": true, "--agent": true}
 	boolFlags = map[string]bool{"--yes": true, "--all": true, "--vm": true, "--container": true,
-		"--no-create": true, "--keep-sandbox": true, "--help": true, "--version": true}
+		"--no-create": true, "--keep-sandbox": true, "--help": true, "--version": true, "--distro-incus": true}
 )
 
 func (a *Args) Has(f string) bool   { _, ok := a.Flags[f]; return ok }
@@ -118,17 +118,17 @@ func parseArgs(argv []string) (*Args, error) {
 // ---------------------------------------------------------------- commands table
 
 type command struct {
-	run          func(*App) error
-	usage, help  string
-	flags        []string
-	minPos       int
-	maxPos       int
-	rest, noRepo bool
+	run              func(*App) error
+	usage, help      string
+	flags            []string
+	minPos           int
+	maxPos           int
+	rest, noRegistry bool
 }
 
 var commands map[string]*command
 var commandOrder = []string{"run", "agents", "agent", "shell", "root", "exec", "add", "ls", "status", "up", "down",
-	"snap", "restore", "rebuild", "rm", "set", "secret", "net", "import", "doctor", "edit", "completion", "version"}
+	"snap", "restore", "rebuild", "rm", "set", "secret", "net", "import", "doctor", "edit", "host", "completion", "version"}
 
 func init() {
 	commands = map[string]*command{
@@ -150,12 +150,13 @@ func init() {
 		"set":        {run: cmdSet, usage: "set key=value...", help: "change settings (cpus/memory live; type/image/disk need rebuild)", minPos: 1, maxPos: 99},
 		"secret":     {run: cmdSecret, usage: "secret set KEY FILE | rm KEY | ls | sync", help: "env vars (API keys) for the sandbox; values stay in host files", minPos: 1, maxPos: 3},
 		"net":        {run: cmdNet, usage: "net open [minutes] | close | log [lines]", help: "egress control", minPos: 1, maxPos: 2},
-		"import":     {run: cmdImport, usage: "import", help: "register sandboxes created directly with sbx"},
+		"import":     {run: cmdImport, usage: "import", help: "register sandboxes created outside abox"},
 		"doctor":     {run: cmdDoctor, usage: "doctor", help: "check host setup and registry"},
-		"edit":       {run: cmdEdit, usage: "edit", help: "open the registry in $EDITOR", noRepo: true},
-		"completion": {run: cmdCompletion, usage: "completion", help: "print bash completion script", noRepo: true},
-		"version":    {run: cmdVersion, usage: "version", help: "print version", noRepo: true},
-		"_names":     {run: cmdNames, noRepo: true},
+		"edit":       {run: cmdEdit, usage: "edit", help: "open the registry in $EDITOR"},
+		"completion": {run: cmdCompletion, usage: "completion", help: "print bash completion script", noRegistry: true},
+		"version":    {run: cmdVersion, usage: "version", help: "print version", noRegistry: true},
+		"host":       {run: cmdHost, usage: "host install [--distro-incus] | host apply   (run with sudo)", help: "set up this machine (Incus, egress proxy/firewall); needs sudo", flags: []string{"--distro-incus"}, minPos: 1, maxPos: 1, noRegistry: true},
+		"_names":     {run: cmdNames},
 		"_agents":    {run: cmdAgentNames},
 	}
 }
@@ -243,6 +244,9 @@ func run(argv []string) error {
 	}
 	if args.HasRest && !c.rest {
 		return usageErr{fmt.Errorf("`--` arguments are only valid for run/<agent> and exec")}
+	}
+	if c.noRegistry {
+		return c.run(&App{reg: &Registry{Projects: map[string]*Project{}}, args: args})
 	}
 	reg, err := loadRegistry()
 	if err != nil {

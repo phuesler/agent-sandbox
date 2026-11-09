@@ -1,7 +1,7 @@
 #!/usr/sbin/nft -f
-# Rendered to /etc/sbx/egress.nft by egress/apply.sh, loaded by sbx-egress.service.
+# Rendered to /etc/sbx/egress.nft by `abox host apply`, loaded by sbx-egress.service.
 # Guests on @SBX_BRIDGE@ may only talk to: each other, the host's DNS/DHCP, and the proxy.
-# `sbx net open` adds a guest IP to @open4 (with timeout) to allow direct internet access.
+# `abox net open` adds a guest IP to @open4 (with timeout) to allow direct internet access.
 
 table inet sbx
 delete table inet sbx

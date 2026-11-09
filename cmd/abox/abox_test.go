@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -146,46 +147,126 @@ func TestParseInstances(t *testing.T) {
 	}
 }
 
-func TestFindRepoViaEnv(t *testing.T) {
+func TestConfigOverride(t *testing.T) {
 	d := t.TempDir()
-	os.WriteFile(filepath.Join(d, "sbx"), nil, 0o755)
-	os.WriteFile(filepath.Join(d, "config.env"), []byte("SBX_NET_PREFIX=10.99.1 # comment\n"), 0o644)
-	t.Setenv("ABOX_REPO", d)
-	e, err := loadEnv()
-	if err != nil || e.Repo != d || e.NetPrefix != "10.99.1." {
-		t.Fatalf("%+v %v", e, err)
+	p := filepath.Join(d, "config.env")
+	t.Setenv("ABOX_CONFIG", p)
+	c, err := loadConfig()
+	if err != nil || c.Source != "built-in defaults" || c.NetPrefix != "10.88.0" || c.GuestUser != "agent" ||
+		!reflect.DeepEqual(c.DefaultAgents, []string{"claude"}) || c.NetOpenMinutes != 30 {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	os.WriteFile(p, []byte("SBX_NET_PREFIX=10.99.1 # comment\nSBX_DEFAULT_AGENTS=\"codex claude\"\n"), 0o644)
+	c, err = loadConfig()
+	if err != nil || c.Source != p || c.ProxyURL() != "http://10.99.1.1:3128" ||
+		!reflect.DeepEqual(c.DefaultAgents, []string{"codex", "claude"}) || c.Bridge != "sbxbr0" {
+		t.Fatalf("override: %+v %v", c, err)
+	}
+	os.WriteFile(p, []byte("SBX_NET_PREFIX=not-an-ip\n"), 0o644)
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("expected invalid prefix error")
 	}
 }
 
-func TestAgentsDiscovery(t *testing.T) {
-	d := t.TempDir()
-	os.WriteFile(filepath.Join(d, "sbx"), nil, 0o755)
-	os.WriteFile(filepath.Join(d, "config.env"), []byte("SBX_DEFAULT_AGENTS=\"codex claude\"\n"), 0o644)
-	mk := func(name, conf string, install bool) {
-		os.MkdirAll(filepath.Join(d, "agents", name), 0o755)
-		os.WriteFile(filepath.Join(d, "agents", name, "agent.conf"), []byte(conf), 0o644)
-		if install {
-			os.WriteFile(filepath.Join(d, "agents", name, "install.sh"), nil, 0o755)
+func TestEmbeddedAgents(t *testing.T) {
+	t.Setenv("ABOX_CONFIG", filepath.Join(t.TempDir(), "none"))
+	c, _ := loadConfig()
+	ag := c.Agents()
+	for _, n := range []string{"claude", "codex", "opencode", "gemini"} {
+		a, ok := ag[n]
+		if !ok || a.Cmd == "" || a.Desc == "" || a.Install == "" || a.Allowlist == "" || a.NixPkg == "" {
+			t.Errorf("agent %s incomplete: %+v", n, a)
 		}
 	}
-	mk("codex", "# c\nAGENT_DESC=\"Codex CLI (OpenAI)\"\nAGENT_CMD='codex --yolo'\nAGENT_AUTH=\"use # sign\"\n", true)
-	mk("claude", "AGENT_DESC=\"Claude\"\nAGENT_CMD=\"claude --dangerously-skip-permissions\"\n", true)
-	mk("broken", "AGENT_DESC=\"no installer\"\n", false)
-	mk("Bad_Name", "AGENT_DESC=x\n", true)
-	t.Setenv("ABOX_REPO", d)
-	e, err := loadEnv()
+	if c.CheckAgents([]string{"claude", "nope"}) == nil {
+		t.Error("CheckAgents accepted unknown agent")
+	}
+	if got := parseAgentConf("x", "# c\nAGENT_DESC=\"A # b\"\nAGENT_CMD='x --y'\n"); got.Desc != "A # b" || got.Cmd != "x --y" {
+		t.Errorf("parseAgentConf: %+v", got)
+	}
+}
+
+func TestPruneDomains(t *testing.T) {
+	got := pruneDomains("quay.io\n.quay.io\nFoo.Example.com # c\n.example.com\n", "a.b.c.org\n.c.org\n.b.c.org\nexact.net\n")
+	want := []string{".c.org", ".example.com", ".quay.io", "exact.net"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestShq(t *testing.T) {
+	cases := map[string]string{"abc": "abc", "a b": "'a b'", "it's": `'it'\''s'`, "": "''", "$HOME": "'$HOME'", "--x=1": "--x=1"}
+	for in, want := range cases {
+		if got := shq(in); got != want {
+			t.Errorf("shq(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestUserArgsCwd(t *testing.T) {
+	e := &Env{Cfg: &Config{GuestUser: "agent"}}
+	for cwd, want := range map[string]string{"/work/a b": "cd '/work/a b'", "/etc": "cd /work ", "/work/../etc": "cd /work ", "": "cd /work "} {
+		args := e.userArgs("n", cwd, "true", false)
+		if script := args[len(args)-1]; !strings.Contains(script, want) {
+			t.Errorf("cwd %q: script %q lacks %q", cwd, script, want)
+		}
+	}
+}
+
+func TestParseDenials(t *testing.T) {
+	lines := []string{
+		"1.0 5 10.88.0.5 TCP_DENIED/403 3900 CONNECT example.com:443 - HIER_NONE/- text/html",
+		"1.0 5 10.88.0.5 TCP_DENIED/403 3900 CONNECT example.com:443 - HIER_NONE/- text/html",
+		"1.0 5 10.88.0.9 TCP_DENIED/403 3900 GET http://evil.test/x - HIER_NONE/- text/html",
+		"1.0 5 10.88.0.5 TCP_TUNNEL/200 3900 CONNECT api.anthropic.com:443 - HIER_DIRECT/1.2.3.4 -",
+		"garbage",
+	}
+	got := parseDenials(lines, map[string]string{"10.88.0.5": "proj"})
+	want := []denial{{"proj", "example.com", 2}, {"10.88.0.9", "evil.test", 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// TestHostFilesParity compares the rendered host files with files installed by
+// the former egress/apply.sh. Run with ABOX_PARITY_DIR=<dir with copies>.
+func TestHostFilesParity(t *testing.T) {
+	dir := os.Getenv("ABOX_PARITY_DIR")
+	if dir == "" {
+		t.Skip("ABOX_PARITY_DIR not set")
+	}
+	t.Setenv("ABOX_CONFIG", filepath.Join(t.TempDir(), "none"))
+	c, _ := loadConfig()
+	files, _, err := hostFiles(c, "someuser")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(e.DefaultAgents, []string{"codex", "claude"}) {
-		t.Errorf("default agents %v", e.DefaultAgents)
+	for _, f := range files {
+		if strings.HasPrefix(f.Path, "/etc/sudoers.d/") { // baseline not readable; same basename as the helper
+			if f.Content != "someuser ALL=(root) NOPASSWD: /usr/local/sbin/sbx-net\n" || f.Mode != 0o440 {
+				t.Errorf("sudoers rule: %q %o", f.Content, f.Mode)
+			}
+			continue
+		}
+		want, err := os.ReadFile(filepath.Join(dir, filepath.Base(f.Path)))
+		if err != nil {
+			t.Logf("no baseline for %s", f.Path)
+			continue
+		}
+		got, wantS := f.Content, string(want)
+		if filepath.Base(f.Path) == "allowlist.squid" { // order/header differ (locale sort): compare as sets
+			got, wantS = strings.Join(pruneDomains(got), "\n"), strings.Join(pruneDomains(wantS), "\n")
+		}
+		if got != wantS {
+			t.Errorf("%s differs from baseline:\n--- got\n%s\n--- want\n%s", f.Path, got, wantS)
+		}
 	}
-	ag := e.Agents()
-	if len(ag) != 2 || ag["codex"].Cmd != "codex --yolo" || ag["codex"].Auth != "use # sign" || ag["claude"].Desc != "Claude" {
-		t.Errorf("agents %+v", ag)
+	root := t.TempDir()
+	if err := writeHostFiles(root, files); err != nil {
+		t.Fatal(err)
 	}
-	if e.CheckAgents([]string{"claude", "codex"}) != nil || e.CheckAgents([]string{"broken"}) == nil {
-		t.Error("CheckAgents")
+	if fi, err := os.Stat(filepath.Join(root, "usr/local/sbin/sbx-net")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("sbx-net mode: %v %v", fi, err)
 	}
 }
 

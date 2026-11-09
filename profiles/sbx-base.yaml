@@ -1,4 +1,4 @@
-description: "Agent sandbox: Ubuntu base (cloud-init: agent user, egress proxy, Docker; agents installed by sbx)"
+description: "Agent sandbox: Ubuntu base (cloud-init: agent user, egress proxy, Docker; agents installed by abox)"
 config:
   cloud-init.user-data: |
     #cloud-config

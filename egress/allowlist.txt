@@ -1,11 +1,12 @@
 # Domains sandboxes may reach through the egress proxy (squid dstdomain format).
 #   .example.com   -> example.com and all subdomains
 #   example.com    -> exactly that host
-# Overlapping entries are pruned automatically by apply.sh.
+# Overlapping entries are pruned automatically.
 # Agent-specific domains live in agents/<name>/allowlist.txt and are merged in
-# for every agent enabled in config.env (SBX_AGENTS_ENABLED).
-# Apply changes with:  sudo ./egress/apply.sh
-# See what got blocked: sbx net log
+# for every agent enabled in SBX_AGENTS_ENABLED (/etc/abox/config.env).
+# This file is built into abox: after editing, rebuild (make install) and run
+#   sudo abox host apply
+# See what got blocked: abox net log
 
 # --- Ubuntu ---
 .ubuntu.com

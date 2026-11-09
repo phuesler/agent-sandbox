@@ -1,4 +1,4 @@
-description: "Agent sandbox: NixOS base (no cloud-init; sbx pushes nixos/sbx.nix and rebuilds)"
+description: "Agent sandbox: NixOS base (no cloud-init; abox pushes nixos/sbx.nix and rebuilds)"
 config: {}
 devices:
   root:

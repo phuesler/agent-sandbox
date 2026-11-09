@@ -39,7 +39,7 @@ func cmdRun(a *App) error {
 	if err := a.ensure(name, agentsLenient, agent); err != nil {
 		return err
 	}
-	return e.sbxExec(workdirEnv(rel), append([]string{"run", name, agent}, a.args.Rest...)...)
+	return e.RunAgent(name, agent, workdir(rel), a.args.Rest)
 }
 
 func cmdAgents(a *App) error {
@@ -175,7 +175,7 @@ func cmdAgent(a *App) error {
 		if err := a.ensureUp(name); err != nil {
 			return err
 		}
-		return e.sbx(nil, append(append([]string{"agent-install", name}, list...), "--update")...)
+		return e.AgentInstall(name, list, true)
 	}
 	return usageErr{fmt.Errorf("usage: abox agent add|rm|default|update <agent...>")}
 }
@@ -236,7 +236,7 @@ func cmdSecret(a *App) error {
 			return err
 		}
 		if contains(inst.Secrets, key) { // existed before: push the (possibly new) value
-			return a.env.sbx(nil, "secret", "set", name, key, file)
+			return a.env.SecretSet(name, key, file)
 		}
 		return nil
 	case "rm":
@@ -255,7 +255,7 @@ func cmdSecret(a *App) error {
 			if err := a.ensure(name, agentsSkip); err != nil {
 				return err
 			}
-			return a.env.sbx(nil, "secret", "rm", name, key)
+			return a.env.SecretRm(name, key)
 		}
 		return nil
 	case "sync":
@@ -266,7 +266,7 @@ func cmdSecret(a *App) error {
 			return err
 		}
 		for _, k := range sortedKeys(pr.Secrets) {
-			if err := a.env.sbx(nil, "secret", "set", name, k, expandHome(pr.Secrets[k])); err != nil {
+			if err := a.env.SecretSet(name, k, pr.Secrets[k]); err != nil {
 				return err
 			}
 		}
@@ -284,7 +284,10 @@ func cmdShell(a *App) error {
 	if err := a.ensure(name, agentsSkip); err != nil {
 		return err
 	}
-	return a.env.sbxExec(workdirEnv(rel), a.args.Cmd, name) // "shell" or "root"
+	if a.args.Cmd == "root" {
+		return a.env.Root(name)
+	}
+	return a.env.Shell(name, workdir(rel))
 }
 
 func cmdExec(a *App) error {
@@ -298,7 +301,7 @@ func cmdExec(a *App) error {
 	if err := a.ensure(name, agentsSkip); err != nil {
 		return err
 	}
-	return a.env.sbxExec(workdirEnv(rel), append([]string{"exec", name, "--"}, a.args.Rest...)...)
+	return a.env.Exec(name, workdir(rel), a.args.Rest)
 }
 
 func cmdAdd(a *App) error {
@@ -501,7 +504,7 @@ func cmdDown(a *App) error {
 	for _, n := range names {
 		if inst, ok := insts[n]; ok && inst.Status == "running" {
 			info("stopping '%s'", n)
-			if err := runIO("incus", "stop", n); err != nil {
+			if err := a.env.Stop(n); err != nil {
 				return err
 			}
 		}
@@ -518,7 +521,11 @@ func cmdSnap(a *App) error {
 	if err != nil {
 		return err
 	}
-	return e.sbx(nil, append([]string{"snap", name}, a.args.Pos...)...)
+	label := ""
+	if len(a.args.Pos) == 1 {
+		label = a.args.Pos[0]
+	}
+	return e.Snap(name, label)
 }
 
 func cmdRestore(a *App) error {
@@ -537,7 +544,7 @@ func cmdRestore(a *App) error {
 	if err != nil {
 		return err
 	}
-	if err := e.sbx(nil, "restore", name, label); err != nil {
+	if err := e.Restore(name, label); err != nil {
 		return err
 	}
 	return a.ensure(name, agentsLenient) // reinstall agents/secrets added after that snapshot
@@ -556,7 +563,7 @@ func cmdRebuild(a *App) error {
 		return err
 	}
 	if _, ok := insts[name]; ok {
-		if err := a.env.sbx(nil, "rm", name, "-f"); err != nil {
+		if err := a.env.Delete(name); err != nil {
 			return err
 		}
 	}
@@ -578,7 +585,7 @@ func cmdRm(a *App) error {
 		if err := confirm(fmt.Sprintf("Delete sandbox '%s' (and its snapshots) and unregister it? Project dir is untouched.", name), a.args.Has("--yes")); err != nil {
 			return err
 		}
-		if err := a.env.sbx(nil, "rm", name, "-f"); err != nil {
+		if err := a.env.Delete(name); err != nil {
 			return err
 		}
 	}
@@ -699,19 +706,26 @@ func cmdNet(a *App) error {
 		return err
 	}
 	action := a.args.Pos[0]
-	var arg []string
+	num := 0
 	if len(a.args.Pos) == 2 {
-		if n, err := strconv.Atoi(a.args.Pos[1]); err != nil || n < 1 {
+		n, err := strconv.Atoi(a.args.Pos[1])
+		if err != nil || n < 1 {
 			return usageErr{fmt.Errorf("expected a positive number, got '%s'", a.args.Pos[1])}
 		}
-		arg = a.args.Pos[1:]
+		num = n
 	}
 	switch action {
 	case "log":
-		return e.sbx(nil, append([]string{"net", "log"}, arg...)...)
+		if num == 0 {
+			num = 5000
+		}
+		return e.NetLog(num)
 	case "open", "close":
-		if action == "close" && arg != nil {
+		if action == "close" && num != 0 {
 			return usageErr{fmt.Errorf("usage: abox net close")}
+		}
+		if action == "open" && num > 1440 {
+			return usageErr{fmt.Errorf("minutes must be 1..1440")}
 		}
 		name, _, err := a.resolve(a.args.Project, false)
 		if err != nil {
@@ -720,7 +734,10 @@ func cmdNet(a *App) error {
 		if err := a.ensure(name, agentsSkip); err != nil {
 			return err
 		}
-		return e.sbx(nil, append([]string{"net", action, name}, arg...)...)
+		if action == "open" {
+			return e.NetOpen(name, num)
+		}
+		return e.NetClose(name)
 	}
 	return usageErr{fmt.Errorf("usage: abox net open [minutes] | close | log [lines]")}
 }
@@ -762,9 +779,13 @@ func cmdDoctor(a *App) error {
 	}
 	fmt.Println(bold("host"))
 	e, envErr := a.Env()
-	check("agent-sandbox repo found", envErr == nil, fmt.Sprint(envErr))
+	src := "-"
+	if e != nil {
+		src = e.Cfg.Source
+	}
+	check("settings loaded ("+src+")", envErr == nil, fmt.Sprint(envErr))
 	_, lookErr := exec.LookPath("incus")
-	check("incus installed", lookErr == nil, "sudo ./install-host.sh")
+	check("incus installed", lookErr == nil, "sudo abox host install")
 	groups, _, _ := capture("id", "-nG")
 	check("incus-admin group active in this shell", strings.Contains(" "+groups+" ", " incus-admin "), "log out/in or `newgrp incus-admin`")
 	var insts map[string]Instance
@@ -777,18 +798,12 @@ func cmdDoctor(a *App) error {
 		}
 		check("incus reachable", err == nil, hint)
 	}
-	repo := "<repo>"
-	if e != nil {
-		repo = e.Repo
-	}
 	for _, unit := range []string{"sbx-proxy", "sbx-egress"} {
 		out, _, _ := capture("systemctl", "is-active", unit)
 		check(unit+".service active", strings.TrimSpace(out) == "active",
-			fmt.Sprintf("sudo systemctl status %s; sudo %s/egress/apply.sh", unit, repo))
+			fmt.Sprintf("sudo systemctl status %s; sudo abox host apply", unit))
 	}
-	check("sbx-net usable via sudo", egressStatus() != nil, fmt.Sprintf("sudo %s/egress/apply.sh (installs the sudoers rule)", repo))
-	_, _, profErr := capture("incus", "profile", "show", "sbx-base")
-	check("sbx profiles loaded", profErr == nil, "sbx init")
+	check("sbx-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
 
 	fmt.Println(bold("projects"))
 	if len(a.reg.Projects) == 0 {

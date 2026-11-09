@@ -13,7 +13,7 @@ test:
 	$(GO) vet ./...
 	$(GO) test ./...
 
-# Link into ~/.local/bin (install-host.sh links /usr/local/bin/abox if bin/abox exists).
+# Link into ~/.local/bin. Everything abox needs is embedded, so the binary can also be copied anywhere.
 install: build link
 
 link:

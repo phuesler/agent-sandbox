@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -254,7 +253,7 @@ func (a *App) defaultAgents() []string {
 		return a.reg.Defaults.Agents
 	}
 	if e, err := a.Env(); err == nil {
-		return e.DefaultAgents
+		return e.Cfg.DefaultAgents
 	}
 	return []string{"claude"}
 }
@@ -412,41 +411,32 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 		}
 		info("creating sandbox '%s' (%s, %s, agents: %s) - first time takes a few minutes",
 			name, pr.Type, pr.Image, strings.Join(agents, ", "))
-		args := []string{"new", name, "--path", pr.Path, "--" + pr.Type, "--image", pr.Image,
-			"--agent", strings.Join(agents, ",")}
-		if pr.CPUs > 0 {
-			args = append(args, "--cpus", strconv.Itoa(pr.CPUs))
+		secrets := map[string]string{}
+		for k, f := range pr.Secrets {
+			secrets[k] = expandHome(f)
 		}
-		if pr.Memory != "" {
-			args = append(args, "--memory", pr.Memory)
-		}
-		if pr.Disk != "" {
-			args = append(args, "--disk", pr.Disk)
-		}
-		for _, k := range sortedKeys(pr.Secrets) {
-			args = append(args, "--secret", k+"="+expandHome(pr.Secrets[k]))
-		}
-		if err := e.sbx(nil, args...); err != nil {
-			if _, exists := mustInstances(e)[name]; !exists {
-				return err
-			}
-			// sandbox exists but some agent failed: continue with reconciliation below
-			warn("sandbox created, but not everything installed; retrying missing parts")
-			insts, _ = e.Instances()
-			inst = insts[name]
-		} else {
+		err := e.Create(CreateOpts{Name: name, Path: pr.Path, Type: pr.Type, Image: pr.Image,
+			Memory: pr.Memory, Disk: pr.Disk, CPUs: pr.CPUs, Agents: agents, Secrets: secrets})
+		if err == nil {
 			return nil
 		}
+		insts, _ = e.Instances()
+		if _, exists := insts[name]; !exists {
+			return err
+		}
+		// sandbox exists but some agent failed: continue with reconciliation below
+		warn("%v; retrying missing parts", err)
+		inst = insts[name]
 	}
 	if inst.Status != "running" {
 		info("starting '%s'", name)
-		if err := e.sbx(nil, "start", name); err != nil { // waits for network
+		if err := e.Start(name); err != nil { // waits for network
 			return err
 		}
 	}
 	for _, k := range sortedKeys(pr.Secrets) {
 		if !contains(inst.Secrets, k) {
-			if err := e.sbx(nil, "secret", "set", name, k, expandHome(pr.Secrets[k])); err != nil {
+			if err := e.SecretSet(name, k, pr.Secrets[k]); err != nil {
 				return err
 			}
 		}
@@ -455,9 +445,9 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 		if contains(inst.Agents, ag) || (policy == agentsSkip && !contains(required, ag)) {
 			continue
 		}
-		if err := e.sbx(nil, "agent-install", name, ag); err != nil {
-			hint := fmt.Sprintf("agent '%s' could not be installed. Blocked downloads show in `abox net log`; "+
-				"after adding agents to the host allowlist run `sudo %s/egress/apply.sh`", ag, e.Repo)
+		if err := e.AgentInstall(name, []string{ag}, false); err != nil {
+			hint := fmt.Sprintf("%v. If a domain is missing from the allowlist: add it to agents/%s/allowlist.txt, "+
+				"rebuild (make install) and run `sudo abox host apply`", err, ag)
 			if policy == agentsStrict || contains(required, ag) {
 				return fmt.Errorf("%s", hint)
 			}
@@ -467,14 +457,10 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 	return nil
 }
 
-func mustInstances(e *Env) map[string]Instance {
-	m, _ := e.Instances()
-	return m
-}
-
-func workdirEnv(rel string) map[string]string {
+// workdir maps a path inside the project to the sandbox (/work/...).
+func workdir(rel string) string {
 	if rel == "." || rel == "" {
-		return nil
+		return "/work"
 	}
-	return map[string]string{"SBX_CWD": filepath.Join("/work", rel)}
+	return filepath.Join("/work", rel)
 }

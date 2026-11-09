@@ -1,10 +1,10 @@
 # Agent plugins
 
-Each directory here is one coding agent. `sbx` and `abox` discover them automatically. A valid plugin needs `agent.conf` and `install.sh`, and its name must be lowercase letters, digits and dashes. It must also not collide with a `abox` command such as `run`, `ls` or `shell`.
+Each directory here is one coding agent. They are built into the abox binary (`go:embed`): after adding or changing one, rebuild with `make install`. A valid plugin needs `agent.conf` and `install.sh`, and its name must be lowercase letters, digits and dashes. It must also not collide with an `abox` command such as `run`, `ls` or `shell`.
 
 ## `agent.conf`
 
-Sourced by `sbx` on the host. Use plain `KEY="value"` lines.
+Plain `KEY="value"` lines (one per line, no shell expansion).
 
 | key | required | meaning |
 |---|---|---|
@@ -25,7 +25,7 @@ Runs **inside the sandbox** as the unprivileged user `agent`, in a login shell. 
 
 ## `allowlist.txt`
 
-Domains the agent needs for installing, updating and talking to its API, in squid `dstdomain` format (`.example.com` = domain plus subdomains). They are merged into the global egress allowlist for agents listed in `SBX_AGENTS_ENABLED` (`config.env`; empty means all). Run `sudo ./egress/apply.sh` after adding or changing one. To find what an agent needs, try installing it (`abox agent add <name>`) without opening egress, read the blocked hosts from `abox net log`, add them, and repeat. `net log` only shows denied requests.
+Domains the agent needs for installing, updating and talking to its API, in squid `dstdomain` format (`.example.com` = domain plus subdomains). They are merged into the global egress allowlist for agents listed in `SBX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). After adding or changing one, rebuild and run `sudo abox host apply`. To find what an agent needs, try installing it (`abox agent add <name>`) without opening egress, read the blocked hosts from `abox net log`, add them, and repeat. `net log` only shows denied requests.
 
 ## Example: aider (untested sketch)
 
