@@ -267,3 +267,28 @@ func TestHostFilesEgress(t *testing.T) {
 		t.Error("allowlist.txt content")
 	}
 }
+
+func TestValidateHostFiles(t *testing.T) {
+	t.Setenv("ABOX_CONFIG", filepath.Join(t.TempDir(), "none"))
+	c, _ := loadConfig()
+	files, _, _ := hostFiles(c, "someuser")
+	orig := nftCheck
+	defer func() { nftCheck = orig }()
+
+	var checked string
+	nftCheck = func(path string) ([]byte, error) {
+		b, _ := os.ReadFile(path)
+		checked = string(b)
+		return nil, nil
+	}
+	if err := validateHostFiles(files); err != nil || !strings.Contains(checked, "table inet abox") {
+		t.Fatalf("valid nft must pass and be checked: %v", err)
+	}
+	nftCheck = func(path string) ([]byte, error) {
+		return []byte("Error: syntax error, unexpected junk"), fmt.Errorf("exit status 1")
+	}
+	err := validateHostFiles(files)
+	if err == nil || !strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(err.Error(), "unexpected junk") {
+		t.Fatalf("invalid nft must be reported before writing: %v", err)
+	}
+}

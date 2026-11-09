@@ -76,6 +76,35 @@ func writeHostFiles(root string, files []hostFile) error {
 	return nil
 }
 
+// nftCheck validates an nftables file without loading it (needs root; tests replace it).
+var nftCheck = func(path string) ([]byte, error) {
+	return exec.Command("nft", "-c", "-f", path).CombinedOutput()
+}
+
+// validateHostFiles checks generated files before anything is installed, so a
+// broken template can never end up on the host.
+func validateHostFiles(files []hostFile) error {
+	for _, f := range files {
+		if !strings.HasSuffix(f.Path, ".nft") {
+			continue
+		}
+		tmp, err := os.CreateTemp("", "abox-*.nft")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(tmp.Name())
+		if _, err := tmp.WriteString(f.Content); err != nil {
+			tmp.Close()
+			return err
+		}
+		tmp.Close()
+		if out, err := nftCheck(tmp.Name()); err != nil {
+			return fmt.Errorf("generated %s is invalid, nothing was changed:\n%s", f.Path, lastLines(string(out), 15))
+		}
+	}
+	return nil
+}
+
 func requireRoot() error {
 	if os.Geteuid() != 0 {
 		return errNotRoot
@@ -141,6 +170,9 @@ func hostApply(e *Env) error {
 	if err != nil {
 		return err
 	}
+	if err := validateHostFiles(files); err != nil { // before touching anything
+		return err
+	}
 	if _, err := user.Lookup("abox-proxy"); err != nil {
 		if err := runCmd("useradd", "--system", "--user-group", "--no-create-home", "--home-dir", "/nonexistent",
 			"--shell", "/usr/sbin/nologin", "--comment", "abox egress filter", "abox-proxy"); err != nil {
@@ -173,7 +205,6 @@ func hostApply(e *Env) error {
 	}
 	steps := [][]string{
 		{"systemctl", "daemon-reload"},
-		{"nft", "-c", "-f", "/etc/abox/egress.nft"},
 		{"systemctl", "enable", "--quiet", "abox-egress.service", "abox-proxy.service"},
 		{"systemctl", "restart", "abox-egress.service"},
 		{"systemctl", "restart", "abox-proxy.service"},
