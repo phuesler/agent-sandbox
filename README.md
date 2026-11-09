@@ -10,11 +10,11 @@ Run coding agents (**Claude Code, Codex, opencode, Gemini CLI**, or any agent yo
 
 ```
 host (Ubuntu 24.04)
-├── incus ── sbxbr0 10.88.0.0/24 ──┬── sandbox A (container)  /work ← ~/code/proj-a   agents: claude, codex
+├── incus ── aboxbr0 10.88.0.0/24 ──┬── sandbox A (container)  /work ← ~/code/proj-a   agents: claude, codex
 │                                  └── sandbox B (VM)         /work ← ~/code/proj-b   agents: opencode
 │                                        └── dockerd → compose networks, netem, ...
 ├── squid  10.88.0.1:3128   domain allowlist (base + enabled agents), logs denials
-└── nftables table inet sbx forward: drop everything except per-IP "open" set
+└── nftables table inet abox forward: drop everything except per-IP "open" set
                             input:   only DNS, DHCP, proxy from the bridge
 ```
 
@@ -30,9 +30,9 @@ abox doctor
 
 `abox` is a single static binary with no runtime dependencies. Everything it needs is built in: the agent plugins, Incus profiles, egress and systemd templates, and default settings. Copy it anywhere; the repo is only needed to build it.
 
-`sudo abox host install` installs Incus, squid and nftables, creates the storage pool and the `sbxbr0` bridge, and sets up the egress layer. It also writes the settings to `/etc/abox/config.env`. That file is root-owned, so nothing in a sandbox can change it. After editing it, or after rebuilding with a changed allowlist or new agents, run `sudo abox host apply`.
+`sudo abox host install` installs Incus, squid and nftables, creates the storage pool and the `aboxbr0` bridge, and sets up the egress layer. It also writes the settings to `/etc/abox/config.env`. That file is root-owned, so nothing in a sandbox can change it. After editing it, or after rebuilding with a changed allowlist or new agents, run `sudo abox host apply`.
 
-Host Docker keeps running untouched. The only change is two `DOCKER-USER` accept rules for `sbxbr0`. Docker's `FORWARD DROP` policy would otherwise break Incus networking.
+Host Docker keeps running untouched. The only change is two `DOCKER-USER` accept rules for `aboxbr0`. Docker's `FORWARD DROP` policy would otherwise break Incus networking.
 
 ## Daily use: `abox`
 
@@ -61,11 +61,11 @@ abox -p other-proj shell  # target another project by name or path
 eval "$(abox completion)" # bash completion (put in ~/.bashrc)
 ```
 
-Projects are recorded in `~/.config/abox/projects.toml` (`abox edit`), with defaults for type, image and agents under `[defaults]`. If no agent default is set there, `SBX_DEFAULT_AGENTS` from `/etc/abox/config.env` applies. The registry lives on the host on purpose: nothing inside a sandbox can change its own resources, agents, secrets or egress.
+Projects are recorded in `~/.config/abox/projects.toml` (`abox edit`), with defaults for type, image and agents under `[defaults]`. If no agent default is set there, `ABOX_DEFAULT_AGENTS` from `/etc/abox/config.env` applies. The registry lives on the host on purpose: nothing inside a sandbox can change its own resources, agents, secrets or egress.
 
 The registry is the source of truth. If a sandbox is missing an agent or secret the registry lists, `abox` installs it. That happens after `abox agent add`, and after restoring an older snapshot. If an agent fails to install, the failure is a warning, unless you're trying to run that agent or asked for it with `up` or `agent`. `abox net open` never installs anything, so you can always open egress to fix a blocked download.
 
-Sandboxes are ordinary Incus instances (`incus list user.sbx=true`). If you created or changed them outside `abox`, `abox import` registers them.
+Sandboxes are ordinary Incus instances (`incus list user.abox=true`). If you created or changed them outside `abox`, `abox import` registers them.
 
 ### Credentials
 
@@ -78,7 +78,7 @@ Every agent runs as user `agent` (with your host uid) and keeps its login inside
 | opencode | `opencode auth login` | provider keys, e.g. `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` |
 | gemini | browser flow can't reach the sandbox | `GEMINI_API_KEY` |
 
-Secrets are exported in the sandbox's login shells from `~/.sbx-env` (mode 600). The registry only stores the path of the host file. `abox secret sync` re-pushes the values after you rotate a key. For git push, create a deploy key or fine-grained token per project inside the sandbox.
+Secrets are exported in the sandbox's login shells from `~/.abox-env` (mode 600). The registry only stores the path of the host file. `abox secret sync` re-pushes the values after you rotate a key. For git push, create a deploy key or fine-grained token per project inside the sandbox.
 
 ### Adding another agent
 
@@ -98,7 +98,7 @@ Both run the same Docker/Compose stack. Copy `examples/netsim` into a project an
 ## Egress
 
 - Guests get `http(s)_proxy` (login shells, apt, dockerd, npm), set to `http://10.88.0.1:3128`. Direct connections are dropped. Private (RFC 1918), link-local and CGNAT ranges (LAN, most VPN overlays) are blocked even when a sandbox is open.
-- The allowlist is `egress/allowlist.txt` plus `agents/*/allowlist.txt` for the agents in `SBX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). `abox host apply` merges the lists and drops overlapping entries. The allowlist is global, not per sandbox: a sandbox with only Claude can still reach the OpenAI API if Codex is enabled on the host.
+- The allowlist is `egress/allowlist.txt` plus `agents/*/allowlist.txt` for the agents in `ABOX_AGENTS_ENABLED` (`/etc/abox/config.env`; empty means all). `abox host apply` merges the lists and drops overlapping entries. The allowlist is global, not per sandbox: a sandbox with only Claude can still reach the OpenAI API if Codex is enabled on the host.
 - `abox net log` lists blocked destinations per sandbox. Add what you need to the allowlist, rebuild, then run `sudo abox host apply`. Re-applying closes any open sandboxes.
 - `abox net open 20` gives the sandbox unrestricted internet for 20 minutes, both through the proxy and directly. `abox net close` ends it early.
 - **Containers inside the sandbox don't inherit the proxy.** Compose services that need the internet during build or run need `HTTP(S)_PROXY` set explicitly, or use `net open`. Image pulls work, because dockerd uses the proxy.
@@ -110,7 +110,7 @@ Both run the same Docker/Compose stack. Copy `examples/netsim` into a project an
 abox add ~/code/proj --image nixos [--vm] --agent claude,codex
 ```
 
-`nixos/sbx.nix` is installed as `/etc/nixos/sbx.nix` and imported. It sets up the proxy, Docker and the `agent` user. Agents come from nixpkgs (`AGENT_NIXPKG`) through a generated `/etc/nixos/sbx-agents.nix`, and `agent update` runs `nixos-rebuild switch --upgrade` there. The agent can change the OS declaratively (`sudo nixos-rebuild switch`, with `--rollback` to undo). Ask it to keep OS changes it depends on in the project repo, for example as `/work/.sandbox/*.nix`. Use Ubuntu for projects that require 24.04.
+`nixos/abox.nix` is installed as `/etc/nixos/abox.nix` and imported. It sets up the proxy, Docker and the `agent` user. Agents come from nixpkgs (`AGENT_NIXPKG`) through a generated `/etc/nixos/abox-agents.nix`, and `agent update` runs `nixos-rebuild switch --upgrade` there. The agent can change the OS declaratively (`sudo nixos-rebuild switch`, with `--rollback` to undo). Ask it to keep OS changes it depends on in the project repo, for example as `/work/.sandbox/*.nix`. Use Ubuntu for projects that require 24.04.
 
 ## Files
 
@@ -121,16 +121,15 @@ abox add ~/code/proj --image nixos [--vm] --agent claude,codex
 | `config.env` | default settings (copied to `/etc/abox/config.env` by `host install`) |
 | `agents/<name>/` | agent plugins: `agent.conf`, `install.sh`, `allowlist.txt` |
 | `profiles/*.yaml` | Incus profiles (reloaded whenever a sandbox is created; limit changes apply to existing sandboxes) |
-| `egress/` | base allowlist, squid + nftables templates, `sbx-net` root helper (target of the sudo rule) |
-| `systemd/` | `sbx-egress.service`, `sbx-proxy.service`, Docker/Incus forward fix, logrotate |
-| `nixos/sbx.nix` | NixOS module for `--image nixos` |
+| `egress/` | base allowlist, squid + nftables templates, `abox-net` root helper (target of the sudo rule) |
+| `systemd/` | `abox-egress.service`, `abox-proxy.service`, Docker/Incus forward fix, logrotate |
+| `nixos/abox.nix` | NixOS module for `--image nixos` |
 | `examples/netsim/` | Compose networking smoke test |
 
 ## Troubleshooting
 
 - Agent install fails: run `abox net log`. Usually the agent's download host isn't in the allowlist yet, so add it, rebuild and run `sudo abox host apply`. As a one-off, `abox net open 10 && abox up && abox net close` also works.
 - Provisioning fails: run `abox root` and look at `/var/log/cloud-init-output.log`.
-- No network in guests: run `abox doctor`, `systemctl status sbx-egress sbx-proxy` and `sudo nft list table inet sbx`. If ufw or firewalld is active, allow `sbxbr0`.
+- No network in guests: run `abox doctor`, `systemctl status abox-egress abox-proxy` and `sudo nft list table inet abox`. If ufw or firewalld is active, allow `aboxbr0`.
 - Docker inside a container fails: use `--vm` for that project. It happens with exotic storage drivers or AppArmor interactions.
 
-Host-side names keep the `sbx` prefix (`sbxbr0`, `sbx-*` profiles and services, `/etc/sbx`, `sbx-net`, `user.sbx.*` instance keys). They are internal identifiers; you never type them.

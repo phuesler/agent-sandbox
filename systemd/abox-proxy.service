@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/usr/sbin/squid -k parse -f /etc/sbx/squid.conf
-ExecStart=/usr/sbin/squid -N -f /etc/sbx/squid.conf
-ExecReload=/usr/sbin/squid -k reconfigure -f /etc/sbx/squid.conf
+ExecStartPre=/usr/sbin/squid -k parse -f /etc/abox/squid.conf
+ExecStart=/usr/sbin/squid -N -f /etc/abox/squid.conf
+ExecReload=/usr/sbin/squid -k reconfigure -f /etc/abox/squid.conf
 Restart=on-failure
 RestartSec=3
 

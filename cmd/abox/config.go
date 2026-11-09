@@ -56,23 +56,26 @@ func loadConfig() (*Config, error) {
 	vals := parseEnvFile(string(def))
 	src := "built-in defaults"
 	if data, err := os.ReadFile(systemConfigPath()); err == nil {
+		src = systemConfigPath()
 		for k, v := range parseEnvFile(string(data)) {
+			if _, known := vals[k]; !known { // typos (or pre-rename SBX_* keys) must not be silently ignored
+				return nil, fmt.Errorf("%s: unknown setting %s (valid settings are listed in the built-in config.env)", src, k)
+			}
 			vals[k] = v
 		}
-		src = systemConfigPath()
 	}
 	c := &Config{
-		Bridge: vals["SBX_BRIDGE"], NetPrefix: vals["SBX_NET_PREFIX"], ProxyPort: vals["SBX_PROXY_PORT"],
-		Pool: vals["SBX_POOL"], PoolSize: vals["SBX_POOL_SIZE"],
-		UbuntuImage: vals["SBX_UBUNTU_IMAGE"], NixosImage: vals["SBX_NIXOS_IMAGE"], GuestUser: vals["SBX_GUEST_USER"],
-		DefaultAgents: strings.Fields(vals["SBX_DEFAULT_AGENTS"]), AgentsEnabled: strings.Fields(vals["SBX_AGENTS_ENABLED"]),
+		Bridge: vals["ABOX_BRIDGE"], NetPrefix: vals["ABOX_NET_PREFIX"], ProxyPort: vals["ABOX_PROXY_PORT"],
+		Pool: vals["ABOX_POOL"], PoolSize: vals["ABOX_POOL_SIZE"],
+		UbuntuImage: vals["ABOX_UBUNTU_IMAGE"], NixosImage: vals["ABOX_NIXOS_IMAGE"], GuestUser: vals["ABOX_GUEST_USER"],
+		DefaultAgents: strings.Fields(vals["ABOX_DEFAULT_AGENTS"]), AgentsEnabled: strings.Fields(vals["ABOX_AGENTS_ENABLED"]),
 		Source: src,
 	}
-	if c.NetOpenMinutes, err = strconv.Atoi(vals["SBX_NET_OPEN_MINUTES"]); err != nil {
-		return nil, fmt.Errorf("%s: SBX_NET_OPEN_MINUTES must be a number", src)
+	if c.NetOpenMinutes, err = strconv.Atoi(vals["ABOX_NET_OPEN_MINUTES"]); err != nil {
+		return nil, fmt.Errorf("%s: ABOX_NET_OPEN_MINUTES must be a number", src)
 	}
 	if !regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}$`).MatchString(c.NetPrefix) {
-		return nil, fmt.Errorf("%s: SBX_NET_PREFIX must look like 10.88.0", src)
+		return nil, fmt.Errorf("%s: ABOX_NET_PREFIX must look like 10.88.0", src)
 	}
 	if len(c.DefaultAgents) == 0 {
 		c.DefaultAgents = []string{"claude"}
@@ -80,19 +83,19 @@ func loadConfig() (*Config, error) {
 	return c, nil
 }
 
-// render substitutes the @SBX_*@ placeholders used by the embedded templates.
+// render substitutes the @ABOX_*@ placeholders used by the embedded templates.
 func (c *Config) render(tmpl string, uid int) string {
 	return strings.NewReplacer(
-		"@SBX_BRIDGE@", c.Bridge,
-		"@SBX_NET_PREFIX@", c.NetPrefix,
-		"@SBX_HOST_IP@", c.HostIP(),
-		"@SBX_PROXY_PORT@", c.ProxyPort,
-		"@SBX_PROXY_URL@", c.ProxyURL(),
-		"@SBX_NO_PROXY@", noProxy,
-		"@SBX_POOL@", c.Pool,
-		"@SBX_UID@", strconv.Itoa(uid),
-		"@SBX_GUEST_USER@", c.GuestUser,
-		"@SBX_NET_OPEN_MINUTES@", strconv.Itoa(c.NetOpenMinutes),
+		"@ABOX_BRIDGE@", c.Bridge,
+		"@ABOX_NET_PREFIX@", c.NetPrefix,
+		"@ABOX_HOST_IP@", c.HostIP(),
+		"@ABOX_PROXY_PORT@", c.ProxyPort,
+		"@ABOX_PROXY_URL@", c.ProxyURL(),
+		"@ABOX_NO_PROXY@", noProxy,
+		"@ABOX_POOL@", c.Pool,
+		"@ABOX_UID@", strconv.Itoa(uid),
+		"@ABOX_GUEST_USER@", c.GuestUser,
+		"@ABOX_NET_OPEN_MINUTES@", strconv.Itoa(c.NetOpenMinutes),
 	).Replace(tmpl)
 }
 
@@ -194,7 +197,7 @@ func (c *Config) buildAllowlist() (string, []string, error) {
 	for _, a := range enabled {
 		ai, ok := c.Agents()[a]
 		if !ok {
-			return "", nil, fmt.Errorf("SBX_AGENTS_ENABLED names unknown agent '%s'", a)
+			return "", nil, fmt.Errorf("ABOX_AGENTS_ENABLED names unknown agent '%s'", a)
 		}
 		texts = append(texts, ai.Allowlist)
 	}

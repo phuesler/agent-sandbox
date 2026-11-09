@@ -3,7 +3,7 @@
 # Checks: nested Docker, multi-network Compose, tc netem, network isolation.
 set -euo pipefail
 cd "$(dirname "$0")"
-dc() { docker compose -p sbx-netsim "$@"; }
+dc() { docker compose -p abox-netsim "$@"; }
 trap 'dc down -t 0 >/dev/null 2>&1' EXIT
 
 dc up -d --quiet-pull

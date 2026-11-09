@@ -1,6 +1,6 @@
 package main
 
-// Host setup (formerly install-host.sh and egress/apply.sh). Runs as root.
+// Host setup. Runs as root.
 
 import (
 	"errors"
@@ -33,20 +33,20 @@ func hostFiles(c *Config, sudoUser string) ([]hostFile, []string, error) {
 	}
 	r := func(p string) string { return c.render(asset(p), 0) }
 	files := []hostFile{
-		{"/etc/sbx/squid.conf", r("egress/squid.conf.in"), 0o644},
-		{"/etc/sbx/egress.nft", r("egress/egress.nft.in"), 0o644},
-		{"/etc/sbx/allowlist.squid", allow, 0o644},
-		{"/etc/sbx/open-clients", "# managed by sbx-net\n192.0.2.1\n", 0o644},
-		{"/usr/local/sbin/sbx-net", r("egress/sbx-net.in"), 0o755},
-		{"/usr/local/lib/sbx/docker-user.sh", r("systemd/docker-user.sh.in"), 0o755},
-		{"/etc/systemd/system/sbx-egress.service", asset("systemd/sbx-egress.service"), 0o644},
-		{"/etc/systemd/system/sbx-proxy.service", asset("systemd/sbx-proxy.service"), 0o644},
-		{"/etc/systemd/system/docker.service.d/sbx-incus-forward.conf", asset("systemd/docker-sbx-incus-forward.conf"), 0o644},
-		{"/etc/logrotate.d/sbx-proxy", asset("systemd/logrotate-sbx-proxy"), 0o644},
+		{"/etc/abox/squid.conf", r("egress/squid.conf.in"), 0o644},
+		{"/etc/abox/egress.nft", r("egress/egress.nft.in"), 0o644},
+		{"/etc/abox/allowlist.squid", allow, 0o644},
+		{"/etc/abox/open-clients", "# managed by abox-net\n192.0.2.1\n", 0o644},
+		{"/usr/local/sbin/abox-net", r("egress/abox-net.in"), 0o755},
+		{"/usr/local/lib/abox/docker-user.sh", r("systemd/docker-user.sh.in"), 0o755},
+		{"/etc/systemd/system/abox-egress.service", asset("systemd/abox-egress.service"), 0o644},
+		{"/etc/systemd/system/abox-proxy.service", asset("systemd/abox-proxy.service"), 0o644},
+		{"/etc/systemd/system/docker.service.d/abox-incus-forward.conf", asset("systemd/docker-abox-incus-forward.conf"), 0o644},
+		{"/etc/logrotate.d/abox-proxy", asset("systemd/logrotate-abox-proxy"), 0o644},
 	}
 	if sudoUser != "" {
-		files = append(files, hostFile{"/etc/sudoers.d/sbx-net",
-			sudoUser + " ALL=(root) NOPASSWD: " + sbxNet + "\n", 0o440})
+		files = append(files, hostFile{"/etc/sudoers.d/abox-net",
+			sudoUser + " ALL=(root) NOPASSWD: " + aboxNet + "\n", 0o440})
 	}
 	return files, agents, nil
 }
@@ -96,7 +96,7 @@ func sudoUser() string {
 func runCmd(name string, args ...string) error { return runIO(name, args...) }
 
 // hostApply (re)installs the egress layer: nftables firewall, squid allowlist
-// proxy, sbx-net helper + sudoers rule, systemd units. Idempotent; closes all
+// proxy, abox-net helper + sudoers rule, systemd units. Idempotent; closes all
 // temporarily opened sandboxes.
 func hostApply(e *Env) error {
 	if err := requireRoot(); err != nil {
@@ -115,13 +115,13 @@ func hostApply(e *Env) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/var/log/sbx-proxy", 0o755); err != nil {
+	if err := os.MkdirAll("/var/log/abox-proxy", 0o755); err != nil {
 		return err
 	}
 	if pu, err := user.Lookup("proxy"); err == nil {
 		uid, _ := strconv.Atoi(pu.Uid)
 		gid, _ := strconv.Atoi(pu.Gid)
-		_ = os.Chown("/var/log/sbx-proxy", uid, gid)
+		_ = os.Chown("/var/log/abox-proxy", uid, gid)
 	}
 	info("installing egress layer (config: %s)", e.Cfg.Source)
 	if err := writeHostFiles("/", files); err != nil {
@@ -129,10 +129,10 @@ func hostApply(e *Env) error {
 	}
 	info("allowlist: base + agents: %s", strings.Join(agents, ", "))
 	if u := sudoUser(); u != "" {
-		info("sudoers: %s may run %s without password", u, sbxNet)
+		info("sudoers: %s may run %s without password", u, aboxNet)
 	}
 	// clear leftover close-timers from earlier `net open`s
-	if out, _, err := capture("systemctl", "list-units", "--plain", "--no-legend", "sbx-net-close-*"); err == nil {
+	if out, _, err := capture("systemctl", "list-units", "--plain", "--no-legend", "abox-net-close-*"); err == nil {
 		for _, l := range strings.Split(out, "\n") {
 			if f := strings.Fields(l); len(f) > 0 {
 				_, _, _ = capture("systemctl", "stop", f[0])
@@ -141,11 +141,11 @@ func hostApply(e *Env) error {
 	}
 	steps := [][]string{
 		{"systemctl", "daemon-reload"},
-		{"nft", "-c", "-f", "/etc/sbx/egress.nft"},
-		{"squid", "-k", "parse", "-f", "/etc/sbx/squid.conf"},
-		{"systemctl", "enable", "--quiet", "sbx-egress.service", "sbx-proxy.service"},
-		{"systemctl", "restart", "sbx-egress.service"},
-		{"systemctl", "restart", "sbx-proxy.service"},
+		{"nft", "-c", "-f", "/etc/abox/egress.nft"},
+		{"squid", "-k", "parse", "-f", "/etc/abox/squid.conf"},
+		{"systemctl", "enable", "--quiet", "abox-egress.service", "abox-proxy.service"},
+		{"systemctl", "restart", "abox-egress.service"},
+		{"systemctl", "restart", "abox-proxy.service"},
 	}
 	for _, s := range steps {
 		if out, err := exec.Command(s[0], s[1:]...).CombinedOutput(); err != nil {
@@ -153,9 +153,9 @@ func hostApply(e *Env) error {
 		}
 	}
 	if out, _, _ := capture("systemctl", "is-active", "docker"); strings.TrimSpace(out) == "active" {
-		_, _, _ = capture("/usr/local/lib/sbx/docker-user.sh")
+		_, _, _ = capture("/usr/local/lib/abox/docker-user.sh")
 	}
-	info("egress layer active: proxy %s, firewall table 'inet sbx'", e.Cfg.ProxyURL())
+	info("egress layer active: proxy %s, firewall table 'inet abox'", e.Cfg.ProxyURL())
 	return nil
 }
 
@@ -259,7 +259,7 @@ func hostInstall(e *Env, distroIncus bool) error {
 	if err := runCmd("apt-get", "install", "-y", "squid", "nftables", "btrfs-progs"); err != nil {
 		return err
 	}
-	// abox runs its own squid instance (sbx-proxy.service); the distro one would grab the port
+	// abox runs its own squid instance (abox-proxy.service); the distro one would grab the port
 	_, _, _ = capture("systemctl", "disable", "--now", "squid.service")
 	_, _, _ = capture("systemctl", "mask", "squid.service")
 	if _, _, err := capture("systemctl", "enable", "--now", "incus.socket", "incus.service"); err != nil {
@@ -278,7 +278,7 @@ func hostInstall(e *Env, distroIncus bool) error {
 	if _, _, err := capture("incus", "network", "show", c.Bridge); err != nil {
 		info("network '%s' (%s/24, NAT, no IPv6)", c.Bridge, c.HostIP())
 		if err := runCmd("incus", "network", "create", c.Bridge, "ipv4.address="+c.HostIP()+"/24", "ipv4.nat=true",
-			"ipv4.dhcp=true", "ipv6.address=none", "dns.domain=sbx"); err != nil {
+			"ipv4.dhcp=true", "ipv6.address=none", "dns.domain=abox"); err != nil {
 			return err
 		}
 	}

@@ -798,12 +798,12 @@ func cmdDoctor(a *App) error {
 		}
 		check("incus reachable", err == nil, hint)
 	}
-	for _, unit := range []string{"sbx-proxy", "sbx-egress"} {
+	for _, unit := range []string{"abox-proxy", "abox-egress"} {
 		out, _, _ := capture("systemctl", "is-active", unit)
 		check(unit+".service active", strings.TrimSpace(out) == "active",
 			fmt.Sprintf("sudo systemctl status %s; sudo abox host apply", unit))
 	}
-	check("sbx-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
+	check("abox-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
 
 	fmt.Println(bold("projects"))
 	if len(a.reg.Projects) == 0 {

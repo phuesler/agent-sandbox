@@ -6,5 +6,5 @@ devices:
   root:
     type: disk
     path: /
-    pool: "@SBX_POOL@"
+    pool: "@ABOX_POOL@"
     size: 60GiB

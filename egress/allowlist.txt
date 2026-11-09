@@ -3,7 +3,7 @@
 #   example.com    -> exactly that host
 # Overlapping entries are pruned automatically.
 # Agent-specific domains live in agents/<name>/allowlist.txt and are merged in
-# for every agent enabled in SBX_AGENTS_ENABLED (/etc/abox/config.env).
+# for every agent enabled in ABOX_AGENTS_ENABLED (/etc/abox/config.env).
 # This file is built into abox: after editing, rebuild (make install) and run
 #   sudo abox host apply
 # See what got blocked: abox net log

@@ -3,56 +3,56 @@ config:
   cloud-init.user-data: |
     #cloud-config
     users:
-      - name: @SBX_GUEST_USER@
-        uid: @SBX_UID@
+      - name: @ABOX_GUEST_USER@
+        uid: @ABOX_UID@
         shell: /bin/bash
         lock_passwd: true
         sudo: "ALL=(ALL) NOPASSWD:ALL"
     apt:
-      http_proxy: @SBX_PROXY_URL@
-      https_proxy: @SBX_PROXY_URL@
+      http_proxy: @ABOX_PROXY_URL@
+      https_proxy: @ABOX_PROXY_URL@
     write_files:
-      - path: /etc/profile.d/00-sbx-proxy.sh
+      - path: /etc/profile.d/00-abox-proxy.sh
         permissions: "0644"
         content: |
           # Egress goes through the host's allowlisting proxy; direct traffic is dropped.
-          export http_proxy=@SBX_PROXY_URL@ https_proxy=@SBX_PROXY_URL@
-          export HTTP_PROXY=@SBX_PROXY_URL@ HTTPS_PROXY=@SBX_PROXY_URL@
-          export no_proxy=@SBX_NO_PROXY@ NO_PROXY=@SBX_NO_PROXY@
+          export http_proxy=@ABOX_PROXY_URL@ https_proxy=@ABOX_PROXY_URL@
+          export HTTP_PROXY=@ABOX_PROXY_URL@ HTTPS_PROXY=@ABOX_PROXY_URL@
+          export no_proxy=@ABOX_NO_PROXY@ NO_PROXY=@ABOX_NO_PROXY@
       - path: /etc/docker/daemon.json
         permissions: "0644"
         content: |
           {
             "proxies": {
-              "http-proxy": "@SBX_PROXY_URL@",
-              "https-proxy": "@SBX_PROXY_URL@",
-              "no-proxy": "@SBX_NO_PROXY@"
+              "http-proxy": "@ABOX_PROXY_URL@",
+              "https-proxy": "@ABOX_PROXY_URL@",
+              "no-proxy": "@ABOX_NO_PROXY@"
             }
           }
-      - path: /etc/sysctl.d/90-sbx.conf
+      - path: /etc/sysctl.d/90-abox.conf
         permissions: "0644"
         content: |
           net.ipv4.ip_forward = 1
           fs.inotify.max_user_watches = 524288
           fs.inotify.max_user_instances = 1024
-      - path: /usr/local/lib/sbx/ensure-node
+      - path: /usr/local/lib/abox/ensure-node
         permissions: "0755"
         content: |
           #!/bin/bash
           # Installs Node.js 22 (NodeSource) once; used by npm-based agents (codex, gemini).
           set -euo pipefail
           if command -v node >/dev/null && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ]; then exit 0; fi
-          . /etc/profile.d/00-sbx-proxy.sh
+          . /etc/profile.d/00-abox-proxy.sh
           export DEBIAN_FRONTEND=noninteractive
           curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
           bash /tmp/nodesource_setup.sh
           apt-get install -y nodejs
-      - path: /usr/local/lib/sbx/provision.sh
+      - path: /usr/local/lib/abox/provision.sh
         permissions: "0755"
         content: |
           #!/bin/bash
           set -euxo pipefail
-          . /etc/profile.d/00-sbx-proxy.sh
+          . /etc/profile.d/00-abox-proxy.sh
           export DEBIAN_FRONTEND=noninteractive
           sysctl --system || true   # some keys are read-only in containers
           install -m 0755 -d /etc/apt/keyrings
@@ -63,10 +63,10 @@ config:
             > /etc/apt/sources.list.d/docker.list
           apt-get update
           apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          usermod -aG docker @SBX_GUEST_USER@
+          usermod -aG docker @ABOX_GUEST_USER@
           systemctl restart docker
-          mkdir -p /var/lib/sbx
-          date -Is > /var/lib/sbx/provisioned
+          mkdir -p /var/lib/abox
+          date -Is > /var/lib/abox/provisioned
     package_update: true
     packages:
       - ca-certificates
@@ -84,14 +84,14 @@ config:
       - netcat-openbsd
       - bridge-utils
     runcmd:
-      - [bash, /usr/local/lib/sbx/provision.sh]
+      - [bash, /usr/local/lib/abox/provision.sh]
 devices:
   root:
     type: disk
     path: /
-    pool: "@SBX_POOL@"
+    pool: "@ABOX_POOL@"
     size: 40GiB
   eth0:
     type: nic
     name: eth0
-    network: "@SBX_BRIDGE@"
+    network: "@ABOX_BRIDGE@"

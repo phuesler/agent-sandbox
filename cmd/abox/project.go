@@ -183,7 +183,7 @@ func (a *App) uniqueName(base string) (string, error) {
 	}
 }
 
-// adopt registers an existing sbx sandbox (created without abox) whose shared dir contains p.
+// adopt registers an existing abox sandbox (created outside this registry) whose shared dir contains p.
 func (a *App) adopt(p string) (bool, error) {
 	insts, err := a.instances()
 	if err != nil {

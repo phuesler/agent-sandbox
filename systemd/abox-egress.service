@@ -1,0 +1,14 @@
+[Unit]
+Description=Agent sandbox egress firewall (nftables table inet abox)
+After=network-online.target incus.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/abox/egress.nft
+ExecStart=-/usr/local/lib/abox/docker-user.sh
+ExecStop=-/usr/sbin/nft delete table inet abox
+
+[Install]
+WantedBy=multi-user.target

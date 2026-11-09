@@ -1,0 +1,12 @@
+description: "Agent sandbox: NixOS base (no cloud-init; abox pushes nixos/abox.nix and rebuilds)"
+config: {}
+devices:
+  root:
+    type: disk
+    path: /
+    pool: "@ABOX_POOL@"
+    size: 40GiB
+  eth0:
+    type: nic
+    name: eth0
+    network: "@ABOX_BRIDGE@"

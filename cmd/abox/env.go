@@ -122,7 +122,7 @@ type incusJSON struct {
 }
 
 func (e *Env) Instances() (map[string]Instance, error) {
-	out, errOut, err := capture("incus", "list", "user.sbx=true", "-f", "json")
+	out, errOut, err := capture("incus", "list", "user.abox=true", "-f", "json")
 	if err != nil {
 		msg := strings.TrimSpace(errOut)
 		if msg == "" {
@@ -145,8 +145,8 @@ func parseInstances(js, prefix string) (map[string]Instance, error) {
 	for _, i := range raw {
 		inst := Instance{
 			Name: i.Name, Status: strings.ToLower(i.Status), Type: "container",
-			Path: i.Config["user.sbx.path"], Image: i.Config["user.sbx.image"], Snaps: len(i.Snapshots),
-			Agents: splitList(i.Config["user.sbx.agents"]), Secrets: splitList(i.Config["user.sbx.secrets"]),
+			Path: i.Config["user.abox.path"], Image: i.Config["user.abox.image"], Snaps: len(i.Snapshots),
+			Agents: splitList(i.Config["user.abox.agents"]), Secrets: splitList(i.Config["user.abox.secrets"]),
 		}
 		if i.Type == "virtual-machine" {
 			inst.Type = "vm"
@@ -175,7 +175,7 @@ var (
 	msRe     = regexp.MustCompile(`\d+ms$`)
 )
 
-// parseEgress turns `sbx-net status` output into ip -> "open 12m3s".
+// parseEgress turns `abox-net status` output into ip -> "open 12m3s".
 func parseEgress(s string) map[string]string {
 	res := map[string]string{}
 	for _, m := range egressRe.FindAllStringSubmatch(s, -1) {
@@ -188,11 +188,11 @@ func parseEgress(s string) map[string]string {
 	return res
 }
 
-const sbxNet = "/usr/local/sbin/sbx-net" // root helper installed by `abox host apply`
+const aboxNet = "/usr/local/sbin/abox-net" // root helper installed by `abox host apply`
 
-// egressStatus returns nil if sbx-net can't be used (no sudoers rule etc.).
+// egressStatus returns nil if abox-net can't be used (no sudoers rule etc.).
 func egressStatus() map[string]string {
-	out, _, err := capture("sudo", "-n", sbxNet, "status")
+	out, _, err := capture("sudo", "-n", aboxNet, "status")
 	if err != nil {
 		return nil
 	}

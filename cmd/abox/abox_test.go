@@ -130,7 +130,7 @@ func TestParseEgress(t *testing.T) {
 }
 
 func TestParseInstances(t *testing.T) {
-	js := `[{"name":"a","status":"Running","type":"container","config":{"user.sbx.path":"/p","user.sbx.image":"ubuntu"},
+	js := `[{"name":"a","status":"Running","type":"container","config":{"user.abox.path":"/p","user.abox.image":"ubuntu"},
 	  "state":{"network":{"eth0":{"addresses":[{"family":"inet","address":"10.88.0.5"}]},
 	                      "docker0":{"addresses":[{"family":"inet","address":"172.17.0.1"}]}}},
 	  "snapshots":[{},{}]},
@@ -156,13 +156,17 @@ func TestConfigOverride(t *testing.T) {
 		!reflect.DeepEqual(c.DefaultAgents, []string{"claude"}) || c.NetOpenMinutes != 30 {
 		t.Fatalf("defaults: %+v %v", c, err)
 	}
-	os.WriteFile(p, []byte("SBX_NET_PREFIX=10.99.1 # comment\nSBX_DEFAULT_AGENTS=\"codex claude\"\n"), 0o644)
+	os.WriteFile(p, []byte("ABOX_NET_PREFIX=10.99.1 # comment\nABOX_DEFAULT_AGENTS=\"codex claude\"\n"), 0o644)
 	c, err = loadConfig()
 	if err != nil || c.Source != p || c.ProxyURL() != "http://10.99.1.1:3128" ||
-		!reflect.DeepEqual(c.DefaultAgents, []string{"codex", "claude"}) || c.Bridge != "sbxbr0" {
+		!reflect.DeepEqual(c.DefaultAgents, []string{"codex", "claude"}) || c.Bridge != "aboxbr0" {
 		t.Fatalf("override: %+v %v", c, err)
 	}
-	os.WriteFile(p, []byte("SBX_NET_PREFIX=not-an-ip\n"), 0o644)
+	os.WriteFile(p, []byte("SBX_NET_PREFIX=10.1.2\n"), 0o644)
+	if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), "unknown setting SBX_NET_PREFIX") {
+		t.Fatalf("expected unknown-key error, got %v", err)
+	}
+	os.WriteFile(p, []byte("ABOX_NET_PREFIX=not-an-ip\n"), 0o644)
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("expected invalid prefix error")
 	}
@@ -228,8 +232,8 @@ func TestParseDenials(t *testing.T) {
 	}
 }
 
-// TestHostFilesParity compares the rendered host files with files installed by
-// the former egress/apply.sh. Run with ABOX_PARITY_DIR=<dir with copies>.
+// TestHostFilesParity compares the rendered host files with a directory of
+// previously installed copies. Run with ABOX_PARITY_DIR=<dir with copies>.
 func TestHostFilesParity(t *testing.T) {
 	dir := os.Getenv("ABOX_PARITY_DIR")
 	if dir == "" {
@@ -243,7 +247,7 @@ func TestHostFilesParity(t *testing.T) {
 	}
 	for _, f := range files {
 		if strings.HasPrefix(f.Path, "/etc/sudoers.d/") { // baseline not readable; same basename as the helper
-			if f.Content != "someuser ALL=(root) NOPASSWD: /usr/local/sbin/sbx-net\n" || f.Mode != 0o440 {
+			if f.Content != "someuser ALL=(root) NOPASSWD: /usr/local/sbin/abox-net\n" || f.Mode != 0o440 {
 				t.Errorf("sudoers rule: %q %o", f.Content, f.Mode)
 			}
 			continue
@@ -265,8 +269,8 @@ func TestHostFilesParity(t *testing.T) {
 	if err := writeHostFiles(root, files); err != nil {
 		t.Fatal(err)
 	}
-	if fi, err := os.Stat(filepath.Join(root, "usr/local/sbin/sbx-net")); err != nil || fi.Mode().Perm() != 0o755 {
-		t.Errorf("sbx-net mode: %v %v", fi, err)
+	if fi, err := os.Stat(filepath.Join(root, "usr/local/sbin/abox-net")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("abox-net mode: %v %v", fi, err)
 	}
 }
 
@@ -291,7 +295,7 @@ func TestRegistryAgentsSecrets(t *testing.T) {
 }
 
 func TestParseInstancesAgents(t *testing.T) {
-	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{"user.sbx.agents":"claude,codex","user.sbx.secrets":""}}]`, "10.88.0.")
+	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{"user.abox.agents":"claude,codex","user.abox.secrets":""}}]`, "10.88.0.")
 	if !reflect.DeepEqual(m["a"].Agents, []string{"claude", "codex"}) || len(m["a"].Secrets) != 0 {
 		t.Errorf("%+v", m["a"])
 	}

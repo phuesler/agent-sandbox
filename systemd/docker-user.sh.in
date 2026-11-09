@@ -1,12 +1,12 @@
 #!/bin/bash
 # Host Docker sets the iptables FORWARD policy to DROP, which also kills Incus bridge
-# traffic. Allow the sandbox bridge in DOCKER-USER (filtering is done by table inet sbx,
+# traffic. Allow the sandbox bridge in DOCKER-USER (filtering is done by table inet abox,
 # whose drops still apply: in netfilter a drop in any base chain is final).
-# Installed to /usr/local/lib/sbx/docker-user.sh; run by sbx-egress.service and as
+# Installed to /usr/local/lib/abox/docker-user.sh; run by abox-egress.service and as
 # ExecStartPost of docker.service.
 set -u
 command -v iptables >/dev/null || exit 0
 iptables -nL DOCKER-USER >/dev/null 2>&1 || exit 0
 add() { iptables -C DOCKER-USER "$@" 2>/dev/null || iptables -I DOCKER-USER "$@"; }
-add -i @SBX_BRIDGE@ -j ACCEPT
-add -o @SBX_BRIDGE@ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+add -i @ABOX_BRIDGE@ -j ACCEPT
+add -o @ABOX_BRIDGE@ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT

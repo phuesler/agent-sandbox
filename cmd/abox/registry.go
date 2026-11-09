@@ -27,7 +27,7 @@ type Project struct {
 type Defaults struct {
 	Type   string   `toml:"type"`
 	Image  string   `toml:"image"`
-	Agents []string `toml:"agents,omitempty"` // empty: SBX_DEFAULT_AGENTS from config.env
+	Agents []string `toml:"agents,omitempty"` // empty: ABOX_DEFAULT_AGENTS from config.env
 }
 
 // Registry lives on the host (never inside a sandbox) so a sandbox cannot

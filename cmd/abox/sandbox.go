@@ -1,6 +1,6 @@
 package main
 
-// Incus operations on single sandboxes (formerly the sbx shell script).
+// Incus operations on single sandboxes.
 
 import (
 	"bufio"
@@ -96,13 +96,20 @@ func (e *Env) WaitReady(name string) error {
 	// Let boot finish so services (dockerd, ...) are up. Right after start systemd's
 	// bus isn't there yet and `--wait` fails immediately, so retry until it reports
 	// a final state ("degraded" is common in containers and fine).
-	for i := 0; i < 120; i++ {
+	// On a new sandbox this includes cloud-init (a few minutes). Capped, so a hung
+	// guest unit can't block abox indefinitely.
+	booted := false
+	for deadline := time.Now().Add(10 * time.Minute); time.Now().Before(deadline); {
 		out, _, _ := capture("incus", "exec", name, "--env", "PATH="+guestPath, "--",
-			"timeout", "120", "systemctl", "is-system-running", "--wait")
+			"timeout", "60", "systemctl", "is-system-running", "--wait")
 		if s := strings.TrimSpace(out); s == "running" || s == "degraded" || s == "maintenance" {
+			booted = true
 			break
 		}
 		time.Sleep(time.Second)
+	}
+	if !booted {
+		warn("%s has not finished booting after 10 minutes; continuing anyway (check: abox root, systemctl list-jobs)", name)
 	}
 	probe := fmt.Sprintf("exec 3<>/dev/tcp/%s/%s", e.Cfg.HostIP(), e.Cfg.ProxyPort)
 	for i := 0; i < 60; i++ {
@@ -111,19 +118,19 @@ func (e *Env) WaitReady(name string) error {
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("%s cannot reach the egress proxy at %s (is sbx-proxy running? `abox doctor`)", name, e.Cfg.ProxyURL())
+	return fmt.Errorf("%s cannot reach the egress proxy at %s (is abox-proxy running? `abox doctor`)", name, e.Cfg.ProxyURL())
 }
 
 var cwdRe = regexp.MustCompile(`^/work(/.*)?$`)
 
 // userArgs builds `incus exec ... su -l <guest user> -c <script>`: a login shell
-// (proxy env), ~/.local/bin on PATH, ~/.sbx-env secrets loaded, cwd below /work.
+// (proxy env), ~/.local/bin on PATH, ~/.abox-env secrets loaded, cwd below /work.
 func (e *Env) userArgs(name, cwd, cmd string, tty bool) []string {
 	if cwd == "" || !cwdRe.MatchString(cwd) || strings.Contains(cwd, "/..") {
 		cwd = "/work"
 	}
 	script := `export PATH="$HOME/.local/bin:$PATH"; cd ` + shq(cwd) +
-		` 2>/dev/null || cd /work 2>/dev/null || cd; [ -f ~/.sbx-env ] && . ~/.sbx-env; ` + cmd
+		` 2>/dev/null || cd /work 2>/dev/null || cd; [ -f ~/.abox-env ] && . ~/.abox-env; ` + cmd
 	mode := "-T"
 	if tty {
 		mode = "-t"
@@ -148,7 +155,7 @@ func (e *Env) RunAgent(name, agent, cwd string, args []string) error {
 	if !ok {
 		return e.CheckAgents([]string{agent})
 	}
-	if !contains(e.getList(name, "user.sbx.agents"), agent) {
+	if !contains(e.getList(name, "user.abox.agents"), agent) {
 		return fmt.Errorf("agent '%s' is not installed in %s (abox agent add %s)", agent, name, agent)
 	}
 	cmd := "exec " + ai.Cmd
@@ -179,7 +186,7 @@ func (e *Env) asUser(name, cmd string) error {
 
 func (e *Env) InitProfiles() error {
 	for _, p := range profileNames {
-		prof := "sbx-" + p
+		prof := "abox-" + p
 		if _, _, err := capture("incus", "profile", "show", prof); err != nil {
 			if err := incusQuiet("profile", "create", prof); err != nil {
 				return err
@@ -215,10 +222,10 @@ func (e *Env) Create(o CreateOpts) error {
 	switch o.Image {
 	case "ubuntu":
 		img = e.Cfg.UbuntuImage
-		args = append(args, img, o.Name, "-p", "sbx-base", "-p", "sbx-"+o.Type)
+		args = append(args, img, o.Name, "-p", "abox-base", "-p", "abox-"+o.Type)
 	case "nixos":
 		img = e.Cfg.NixosImage
-		args = append(args, img, o.Name, "-p", "sbx-nixos-base", "-p", "sbx-"+o.Type)
+		args = append(args, img, o.Name, "-p", "abox-nixos-base", "-p", "abox-"+o.Type)
 		if o.Type == "vm" {
 			args = append(args, "-c", "security.secureboot=false")
 		}
@@ -237,7 +244,7 @@ func (e *Env) Create(o CreateOpts) error {
 	if o.Disk != "" {
 		args = append(args, "-d", "root,size="+o.Disk)
 	}
-	args = append(args, "-c", "user.sbx=true", "-c", "user.sbx.path="+o.Path, "-c", "user.sbx.image="+o.Image)
+	args = append(args, "-c", "user.abox=true", "-c", "user.abox.path="+o.Path, "-c", "user.abox.image="+o.Image)
 
 	info("creating %s '%s' from %s", o.Type, o.Name, img)
 	if err := runIO("incus", args...); err != nil {
@@ -261,7 +268,7 @@ func (e *Env) Create(o CreateOpts) error {
 	if o.Image == "ubuntu" {
 		info("waiting for cloud-init provisioning (Docker, base tools) ...")
 		_, _, _ = capture("incus", "exec", o.Name, "--", "cloud-init", "status", "--wait")
-		if _, _, err := capture("incus", "exec", o.Name, "--", "test", "-f", "/var/lib/sbx/provisioned"); err != nil {
+		if _, _, err := capture("incus", "exec", o.Name, "--", "test", "-f", "/var/lib/abox/provisioned"); err != nil {
 			_ = runStdin(nil, "incus", "exec", o.Name, "--", "tail", "-n", "40", "/var/log/cloud-init-output.log")
 			return fmt.Errorf("provisioning failed. Inspect with `abox root`; blocked downloads show in `abox net log`")
 		}
@@ -302,7 +309,7 @@ func (e *Env) Stop(name string) error { return runIO("incus", "stop", name) }
 
 func (e *Env) Delete(name string) error {
 	if insts, err := e.Instances(); err == nil && insts[name].IP != "" {
-		_, _, _ = capture("sudo", "-n", sbxNet, "close", insts[name].IP)
+		_, _, _ = capture("sudo", "-n", aboxNet, "close", insts[name].IP)
 	}
 	return runIO("incus", "delete", "--force", name)
 }
@@ -335,7 +342,7 @@ func (e *Env) nixosRebuild(name string, upgrade bool) error {
 	return runStdin(nil, "incus", "exec", name, "--env", "PATH="+guestPath, "--", "sh", "-euc", script)
 }
 
-// nixosAgentsFile writes /etc/nixos/sbx-agents.nix with the agents' nixpkgs.
+// nixosAgentsFile writes /etc/nixos/abox-agents.nix with the agents' nixpkgs.
 func (e *Env) nixosAgentsFile(name string, agents []string) error {
 	var pkgs []string
 	for _, a := range agents {
@@ -347,12 +354,12 @@ func (e *Env) nixosAgentsFile(name string, agents []string) error {
 	}
 	nix := "# generated by abox: coding agents of this sandbox\n{ pkgs, ... }:\n{\n  environment.systemPackages = with pkgs; [ " +
 		strings.Join(pkgs, " ") + " ];\n}\n"
-	return pushFile(name, "/etc/nixos/sbx-agents.nix", nix, "0644")
+	return pushFile(name, "/etc/nixos/abox-agents.nix", nix, "0644")
 }
 
 func (e *Env) provisionNixos(name string) error {
-	info("NixOS: pushing /etc/nixos/sbx.nix and rebuilding (first run downloads a lot)")
-	if err := pushFile(name, "/etc/nixos/sbx.nix", e.Cfg.render(asset("nixos/sbx.nix"), e.UID), "0644"); err != nil {
+	info("NixOS: pushing /etc/nixos/abox.nix and rebuilding (first run downloads a lot)")
+	if err := pushFile(name, "/etc/nixos/abox.nix", e.Cfg.render(asset("nixos/abox.nix"), e.UID), "0644"); err != nil {
 		return err
 	}
 	if err := e.nixosAgentsFile(name, nil); err != nil { // agents are added by AgentInstall
@@ -360,8 +367,8 @@ func (e *Env) provisionNixos(name string) error {
 	}
 	p := e.Cfg.ProxyURL()
 	script := `f=/etc/nixos/configuration.nix
-grep -q './sbx.nix' $f || sed -i '0,/imports = \[/s//imports = [ .\/sbx.nix/' $f
-grep -q './sbx.nix' $f || { echo 'could not add import to configuration.nix' >&2; exit 1; }
+grep -q './abox.nix' $f || sed -i '0,/imports = \[/s//imports = [ .\/abox.nix/' $f
+grep -q './abox.nix' $f || { echo 'could not add import to configuration.nix' >&2; exit 1; }
 systemctl set-environment http_proxy=` + p + ` https_proxy=` + p + `
 systemctl restart nix-daemon
 export http_proxy=` + p + ` https_proxy=` + p + `
@@ -369,7 +376,7 @@ nix-channel --list | grep -q . || nix-channel --add https://nixos.org/channels/n
 nix-channel --update
 nixos-rebuild switch
 systemctl unset-environment http_proxy https_proxy
-mkdir -p /var/lib/sbx && date -Is > /var/lib/sbx/provisioned
+mkdir -p /var/lib/abox && date -Is > /var/lib/abox/provisioned
 `
 	return runStdin(nil, "incus", "exec", name, "--env", "PATH="+guestPath, "--", "sh", "-euc", script)
 }
@@ -384,14 +391,14 @@ func (e *Env) AgentInstall(name string, agents []string, update bool) error {
 	if err := e.WaitReady(name); err != nil {
 		return err
 	}
-	if img, _ := incusOut("config", "get", name, "user.sbx.image"); img == "nixos" {
-		all := e.getList(name, "user.sbx.agents")
+	if img, _ := incusOut("config", "get", name, "user.abox.image"); img == "nixos" {
+		all := e.getList(name, "user.abox.agents")
 		for _, a := range agents {
 			if !contains(all, a) {
 				all = append(all, a)
 			}
 		}
-		info("NixOS: adding %s to /etc/nixos/sbx-agents.nix and rebuilding", strings.Join(agents, ", "))
+		info("NixOS: adding %s to /etc/nixos/abox-agents.nix and rebuilding", strings.Join(agents, ", "))
 		if err := e.nixosAgentsFile(name, all); err != nil {
 			return err
 		}
@@ -406,7 +413,7 @@ func (e *Env) AgentInstall(name string, agents []string, update bool) error {
 			suffix = " (update)"
 		}
 		info("installing agent '%s' in %s%s", a, name, suffix)
-		script := "/tmp/sbx-install-" + a + ".sh"
+		script := "/tmp/abox-install-" + a + ".sh"
 		if err := pushFile(name, script, e.Agents()[a].Install, "0755"); err != nil {
 			return err
 		}
@@ -414,10 +421,10 @@ func (e *Env) AgentInstall(name string, agents []string, update bool) error {
 		if update {
 			flag = "1"
 		}
-		if err := e.asUser(name, "cd && SBX_AGENT_UPDATE="+flag+" bash "+script); err != nil {
+		if err := e.asUser(name, "cd && ABOX_AGENT_UPDATE="+flag+" bash "+script); err != nil {
 			return fmt.Errorf("installing agent '%s' failed. Blocked downloads show in `abox net log`", a)
 		}
-		if err := e.listAdd(name, "user.sbx.agents", a); err != nil {
+		if err := e.listAdd(name, "user.abox.agents", a); err != nil {
 			return err
 		}
 	}
@@ -427,7 +434,7 @@ func (e *Env) AgentInstall(name string, agents []string, update bool) error {
 // ---------------------------------------------------------------- secrets
 
 // SecretSet exports KEY (value read from a host file) in the guest's login
-// shells via ~/.sbx-env (mode 600). The value never goes into Incus config.
+// shells via ~/.abox-env (mode 600). The value never goes into Incus config.
 func (e *Env) SecretSet(name, key, file string) error {
 	if !envKeyRe.MatchString(key) {
 		return fmt.Errorf("invalid variable name '%s'", key)
@@ -438,26 +445,26 @@ func (e *Env) SecretSet(name, key, file string) error {
 	}
 	value := strings.TrimRight(strings.ReplaceAll(string(data), "\r", ""), "\n")
 	line := "export " + key + "=" + shq(value) + "\n"
-	script := `umask 077; f=$HOME/.sbx-env; touch $f; { grep -v '^export ` + key + `=' $f || true; cat; } > $f.new && mv $f.new $f`
+	script := `umask 077; f=$HOME/.abox-env; touch $f; { grep -v '^export ` + key + `=' $f || true; cat; } > $f.new && mv $f.new $f`
 	if err := runStdin(strings.NewReader(line), "incus", "exec", "-T", name, "--env", "PATH="+guestPath, "--",
 		"su", "-l", e.Cfg.GuestUser, "-c", script); err != nil {
 		return fmt.Errorf("setting secret %s failed", key)
 	}
 	info("secret %s set in %s", key, name)
-	return e.listAdd(name, "user.sbx.secrets", key)
+	return e.listAdd(name, "user.abox.secrets", key)
 }
 
 func (e *Env) SecretRm(name, key string) error {
 	if !envKeyRe.MatchString(key) {
 		return fmt.Errorf("invalid variable name '%s'", key)
 	}
-	script := `f=$HOME/.sbx-env; [ -f $f ] || exit 0; umask 077; grep -v '^export ` + key + `=' $f > $f.new || true; mv $f.new $f`
+	script := `f=$HOME/.abox-env; [ -f $f ] || exit 0; umask 077; grep -v '^export ` + key + `=' $f > $f.new || true; mv $f.new $f`
 	if err := runStdin(nil, "incus", "exec", "-T", name, "--env", "PATH="+guestPath, "--",
 		"su", "-l", e.Cfg.GuestUser, "-c", script); err != nil {
 		return fmt.Errorf("removing secret %s failed", key)
 	}
 	info("secret %s removed from %s", key, name)
-	return e.listDel(name, "user.sbx.secrets", key)
+	return e.listDel(name, "user.abox.secrets", key)
 }
 
 // ---------------------------------------------------------------- egress
@@ -481,7 +488,7 @@ func (e *Env) NetOpen(name string, minutes int) error {
 	if minutes <= 0 {
 		minutes = e.Cfg.NetOpenMinutes
 	}
-	return runIO("sudo", sbxNet, "open", ip, strconv.Itoa(minutes))
+	return runIO("sudo", aboxNet, "open", ip, strconv.Itoa(minutes))
 }
 
 func (e *Env) NetClose(name string) error {
@@ -489,10 +496,10 @@ func (e *Env) NetClose(name string) error {
 	if err != nil {
 		return err
 	}
-	return runIO("sudo", sbxNet, "close", ip)
+	return runIO("sudo", aboxNet, "close", ip)
 }
 
-const proxyLog = "/var/log/sbx-proxy/access.log"
+const proxyLog = "/var/log/abox-proxy/access.log"
 
 type denial struct {
 	Who, Host string

@@ -1,4 +1,4 @@
-// abox - project-centric front end for sbx (coding-agent sandboxes on Incus).
+// abox - coding-agent sandboxes on Incus, managed per project.
 //
 // Run `abox` inside any project directory: it registers the project (asking
 // once), creates/starts its sandbox and launches the project's coding agent

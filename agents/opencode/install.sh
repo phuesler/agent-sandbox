@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-if [[ -n ${SBX_AGENT_UPDATE:-} ]] || ! command -v opencode >/dev/null; then
+if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v opencode >/dev/null; then
   curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path
   mkdir -p "$HOME/.local/bin"
   ln -sfn "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
