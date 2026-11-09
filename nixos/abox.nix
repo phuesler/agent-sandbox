@@ -24,6 +24,7 @@
     extraGroups = [ "wheel" "docker" ];
   };
   security.sudo.wheelNeedsPassword = false;
+  boot.kernel.sysctl."net.ipv4.ping_group_range" = "0 999999999"; # unprivileged ping
 
   environment.systemPackages = with pkgs; [
     git curl jq unzip
