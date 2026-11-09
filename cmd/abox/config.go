@@ -24,7 +24,7 @@ func systemConfigPath() string {
 type Config struct {
 	Bridge, NetPrefix, ProxyPort, Pool, PoolSize string
 	UbuntuImage, NixosImage, GuestUser           string
-	DefaultAgents, AgentsEnabled                 []string
+	DefaultAgents, AgentsEnabled, ImageAgents    []string
 	NetOpenMinutes                               int
 	Source                                       string // where settings came from (doctor)
 
@@ -70,7 +70,8 @@ func loadConfig() (*Config, error) {
 		Pool: vals["ABOX_POOL"], PoolSize: vals["ABOX_POOL_SIZE"],
 		UbuntuImage: vals["ABOX_UBUNTU_IMAGE"], NixosImage: vals["ABOX_NIXOS_IMAGE"], GuestUser: vals["ABOX_GUEST_USER"],
 		DefaultAgents: strings.Fields(vals["ABOX_DEFAULT_AGENTS"]), AgentsEnabled: strings.Fields(vals["ABOX_AGENTS_ENABLED"]),
-		Source: src,
+		ImageAgents: strings.Fields(vals["ABOX_IMAGE_AGENTS"]),
+		Source:      src,
 	}
 	if c.NetOpenMinutes, err = strconv.Atoi(vals["ABOX_NET_OPEN_MINUTES"]); err != nil {
 		return nil, fmt.Errorf("%s: ABOX_NET_OPEN_MINUTES must be a number", src)

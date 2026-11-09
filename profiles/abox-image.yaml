@@ -1,0 +1,22 @@
+description: "Agent sandbox: clone of the abox base image (already provisioned; cloud-init only refreshes host identity)"
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    # Everything was installed when the base image was built (abox image build).
+    # No users here: the agent user already exists, and no default user is wanted.
+    users: []
+    # Must be repeated: cloud-init's apt module removes its proxy file when a
+    # (re-)run has no apt proxy configured, which would leave apt without egress.
+    apt:
+      http_proxy: @ABOX_PROXY_URL@
+      https_proxy: @ABOX_PROXY_URL@
+devices:
+  root:
+    type: disk
+    path: /
+    pool: "@ABOX_POOL@"
+    size: 40GiB
+  eth0:
+    type: nic
+    name: eth0
+    network: "@ABOX_BRIDGE@"

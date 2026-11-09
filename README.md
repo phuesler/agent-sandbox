@@ -49,6 +49,7 @@ abox agent add opencode   # enable + install more agents; agent rm / default / u
 abox secret set OPENAI_API_KEY ~/.secrets/openai      # env var in the sandbox (value stays in the host file)
 abox ls                   # all projects: agents, state, IP, egress (open/allowlist), snapshots
 abox addon add browser    # headless Chrome the agents can drive (see "Web apps" below)
+abox image ls             # base image new sandboxes are cloned from (see below)
 abox port 3000            # http://localhost:3000 on this machine -> port 3000 in the sandbox
 abox shell | root         # shell in the sandbox (same subdir) | root shell
 abox exec -- make test    # one-off command in the sandbox
@@ -99,6 +100,16 @@ Secrets are exported in the sandbox's login shells from `~/.abox-env` (mode 600)
 ### Adding another agent
 
 Create `agents/<name>/` with three files (see `agents/README.md`), rebuild with `make install`, then run `sudo abox host apply` so its domains are allowed. No Go code changes are needed: `abox agents` lists it, and `abox <name>` runs it.
+
+## Fast sandbox creation: the base image
+
+New Ubuntu sandboxes are copy-on-write clones of a local base image (`abox-base-container`, or `abox-base-vm` for VMs). The image already contains the OS packages, Docker, Node and the agents. Creating a sandbox takes about 5 seconds instead of several minutes.
+
+- The image is built automatically by the first `abox add` (about 4 minutes, once per sandbox type). It's rebuilt automatically when abox or its settings change, because the image records a hash of everything it was built from.
+- `abox image ls` shows its age and status. `abox image build [--vm]` rebuilds it to pick up package and agent updates; `abox doctor` reminds you after 14 days.
+- The image never contains a project, secrets or agent logins. It's built from a fresh sandbox, and per-instance state (machine ID, SSH host keys, cloud-init state, logs, caches) is reset so every clone gets its own identity.
+- `ABOX_IMAGE_AGENTS` in `/etc/abox/config.env` limits which agents are preinstalled (empty means all). Add-ons are not part of the image; they are installed per project.
+- NixOS sandboxes are still provisioned from scratch.
 
 ## Web apps: browser and port forwarding
 

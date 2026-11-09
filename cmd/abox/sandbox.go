@@ -19,7 +19,7 @@ import (
 // PATH inside guests (covers NixOS, where su lives in /run/wrappers/bin).
 const guestPath = "/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-var profileNames = []string{"base", "container", "vm", "nixos-base"}
+var profileNames = []string{"base", "image", "container", "vm", "nixos-base"}
 
 func incusOut(args ...string) (string, error) {
 	out, errOut, err := capture("incus", args...)
@@ -227,11 +227,22 @@ func (e *Env) Create(o CreateOpts) error {
 		return err
 	}
 	var img string
+	var preinstalled []string // agents already present when cloning the base image
 	args := []string{"init"}
 	switch o.Image {
 	case "ubuntu":
-		img = e.Cfg.UbuntuImage
-		args = append(args, img, o.Name, "-p", "abox-base", "-p", "abox-"+o.Type)
+		alias, agents, err := e.ensureBaseImage(o.Type)
+		if err != nil {
+			warn("base image unavailable (%v); provisioning from scratch instead", err)
+			img = e.Cfg.UbuntuImage
+			args = append(args, img, o.Name, "-p", "abox-base", "-p", "abox-"+o.Type)
+		} else {
+			img, preinstalled = alias, agents
+			args = append(args, img, o.Name, "-p", "abox-image", "-p", "abox-"+o.Type)
+			if len(agents) > 0 {
+				args = append(args, "-c", "user.abox.agents="+strings.Join(agents, ","))
+			}
+		}
 	case "nixos":
 		img = e.Cfg.NixosImage
 		args = append(args, img, o.Name, "-p", "abox-nixos-base", "-p", "abox-"+o.Type)
@@ -275,7 +286,9 @@ func (e *Env) Create(o CreateOpts) error {
 	}
 
 	if o.Image == "ubuntu" {
-		info("waiting for cloud-init provisioning (Docker, base tools) ...")
+		if preinstalled == nil {
+			info("waiting for cloud-init provisioning (Docker, base tools) ...")
+		}
 		_, _, _ = capture("incus", "exec", o.Name, "--", "cloud-init", "status", "--wait")
 		if _, _, err := capture("incus", "exec", o.Name, "--", "test", "-f", "/var/lib/abox/provisioned"); err != nil {
 			_ = runStdin(nil, "incus", "exec", o.Name, "--", "tail", "-n", "40", "/var/log/cloud-init-output.log")
@@ -292,6 +305,9 @@ func (e *Env) Create(o CreateOpts) error {
 	}
 	var failed []string
 	for _, a := range o.Agents {
+		if contains(preinstalled, a) {
+			continue
+		}
 		if err := e.AgentInstall(o.Name, []string{a}, false); err != nil {
 			warn("%v", err)
 			failed = append(failed, a)

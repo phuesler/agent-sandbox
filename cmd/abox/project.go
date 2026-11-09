@@ -420,7 +420,7 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 		if fi, err := os.Stat(pr.Path); err != nil || !fi.IsDir() {
 			return fmt.Errorf("project dir %s is missing", pr.Path)
 		}
-		info("creating sandbox '%s' (%s, %s, agents: %s) - first time takes a few minutes",
+		info("creating sandbox '%s' (%s, %s, agents: %s)",
 			name, pr.Type, pr.Image, strings.Join(agents, ", "))
 		var ports []Port
 		for _, ps := range pr.Ports {

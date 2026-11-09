@@ -129,7 +129,7 @@ type command struct {
 
 var commands map[string]*command
 var commandOrder = []string{"run", "agents", "agent", "addon", "port", "shell", "root", "exec", "add", "ls", "status", "up", "down",
-	"snap", "restore", "rebuild", "rm", "set", "secret", "net", "import", "doctor", "edit", "host", "completion", "version"}
+	"snap", "restore", "rebuild", "rm", "set", "secret", "net", "image", "import", "doctor", "edit", "host", "completion", "version"}
 
 func init() {
 	commands = map[string]*command{
@@ -137,6 +137,7 @@ func init() {
 		"agents":     {run: cmdAgents, usage: "agents", help: "list available agents (and which this project uses) + auth hints"},
 		"agent":      {run: cmdAgent, usage: "agent add|rm|default|update <agent...>", help: "manage this project's agents", minPos: 1, maxPos: 99},
 		"addon":      {run: cmdAddon, usage: "addon ls | add|rm|update <addon...>", help: "extra tooling for agents, e.g. browser (headless Chrome)", minPos: 1, maxPos: 99},
+		"image":      {run: cmdImage, usage: "image ls | build [--vm] | rm [--vm]", help: "base image new sandboxes are cloned from (built automatically)", flags: []string{"--vm"}, minPos: 1, maxPos: 1},
 		"port":       {run: cmdPort, usage: "port [ls] | port <port>|<hostport>:<sandboxport> | port rm <port>", help: "forward localhost:<port> on this machine into the sandbox", maxPos: 2},
 		"shell":      {run: cmdShell, usage: "shell", help: "login shell in the sandbox (same subdir)"},
 		"root":       {run: cmdShell, usage: "root", help: "root shell"},

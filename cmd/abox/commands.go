@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // cmdRun runs an agent (default: the project's first agent) in autonomous mode.
@@ -832,6 +833,19 @@ func cmdDoctor(a *App) error {
 	}
 	check("abox-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
 
+	if envErr == nil && insts != nil {
+		img := e.baseImage("container")
+		switch {
+		case !img.Exists:
+			fmt.Println("  --  base image not built yet (first `abox add` builds it, a few minutes once)")
+		case img.Hash != e.imageHash("container"):
+			fmt.Println("  --  base image outdated; the next `abox add` rebuilds it")
+		case time.Since(img.Created) > imageStaleAfter:
+			check("base image fresh", false, "abox image build   (refreshes packages and agents)")
+		default:
+			check(fmt.Sprintf("base image current (%d days old)", int(time.Since(img.Created).Hours()/24)), true, "")
+		}
+	}
 	fmt.Println(bold("projects"))
 	if len(a.reg.Projects) == 0 {
 		fmt.Println("  (none)")

@@ -387,3 +387,28 @@ func TestUserArgsPty(t *testing.T) {
 		t.Errorf("non-interactive session must not use a pty: %s", plain)
 	}
 }
+
+func TestImageHash(t *testing.T) {
+	t.Setenv("ABOX_CONFIG", filepath.Join(t.TempDir(), "none"))
+	c, _ := loadConfig()
+	e := &Env{Cfg: c, UID: 1000}
+	h := e.imageHash("container")
+	if h != e.imageHash("container") || len(h) != 16 {
+		t.Fatalf("hash not stable: %s", h)
+	}
+	if h == e.imageHash("vm") {
+		t.Error("container and vm images must differ")
+	}
+	e2 := &Env{Cfg: c, UID: 1001}
+	if h == e2.imageHash("container") {
+		t.Error("uid must be part of the hash (the agent user is created with it)")
+	}
+	c.agents["claude"] = AgentInfo{Name: "claude", Install: "changed", Cmds: c.agents["claude"].Cmds}
+	if h == e.imageHash("container") {
+		t.Error("changed agent installer must change the hash")
+	}
+	c.ImageAgents = []string{"claude"}
+	if got := e.imageAgents(); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("ABOX_IMAGE_AGENTS ignored: %v", got)
+	}
+}
