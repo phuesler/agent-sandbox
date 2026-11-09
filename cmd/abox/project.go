@@ -258,6 +258,17 @@ func (a *App) defaultAgents() []string {
 	return []string{"claude"}
 }
 
+// modeOf returns the project's permission mode (project > defaults > auto).
+func (a *App) modeOf(name string) string {
+	if pr := a.reg.Projects[name]; pr != nil && pr.Mode != "" {
+		return pr.Mode
+	}
+	if a.reg.Defaults.Mode != "" {
+		return a.reg.Defaults.Mode
+	}
+	return defaultMode
+}
+
 // agentsOf returns the project's agents (default first).
 func (a *App) agentsOf(name string) []string {
 	if pr := a.reg.Projects[name]; pr != nil && len(pr.Agents) > 0 {

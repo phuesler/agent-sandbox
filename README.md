@@ -1,6 +1,6 @@
 # agent-sandbox (`abox`)
 
-Run coding agents (**Claude Code, Codex, opencode, Gemini CLI**, or any agent you add) in fully autonomous mode inside Incus **system containers** or **VMs**. Each sandbox:
+Run coding agents (**Claude Code, Codex, opencode, Gemini CLI**, or any agent you add) inside Incus **system containers** or **VMs**, by default in each agent's own automatic permission mode. Each sandbox:
 
 - sees **only one project directory** from the host, mounted at `/work`
 - is the agent's own OS: passwordless root, Docker, Compose, `tc`/netns. The agent can install or tune anything, and snapshots let you roll it back
@@ -66,6 +66,20 @@ Projects are recorded in `~/.config/abox/projects.toml` (`abox edit`), with defa
 The registry is the source of truth. If a sandbox is missing an agent or secret the registry lists, `abox` installs it. That happens after `abox agent add`, and after restoring an older snapshot. If an agent fails to install, the failure is a warning, unless you're trying to run that agent or asked for it with `up` or `agent`. `abox net open` never installs anything, so you can always open egress to fix a blocked download.
 
 Sandboxes are ordinary Incus instances (`incus list user.abox=true`). If you created or changed them outside `abox`, `abox import` registers them.
+
+### Permission modes
+
+Each project has a mode that decides how the agent is started. Set it with `abox set mode=...`, or override it for a single run with `abox --ask`, `abox --auto` or `abox --bypass`. `abox ls` and `abox status` show it, and every run prints it.
+
+| mode | meaning | claude | codex | gemini | opencode |
+|---|---|---|---|---|---|
+| `ask` | asks before edits and commands | `--permission-mode manual` | read-only sandbox, asks on request | `--approval-mode default` | edit/bash/webfetch: ask |
+| **`auto`** (default) | the agent's own automatic mode: routine actions run, risky ones are checked or asked | `--permission-mode auto` | `--approve-for-me` (automatic review, Codex's own workspace sandbox) | `--approval-mode auto_edit` | edits and webfetch allowed, shell commands ask |
+| `bypass` | no permission checks; the sandbox is the only boundary | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--yolo` | everything allowed |
+
+Even in `bypass` mode the sandbox limits the damage: only the project directory is visible, only allowlisted domains are reachable, and no host credentials are present. But `/work` is your real project directory, so the agent can delete or overwrite anything in it, and it can use any API key or token you gave it. Commit often, and prefer `auto` unless you are watching.
+
+Codex's own sandbox (used by `ask` and `auto`) needs user namespaces, which Ubuntu restricts through AppArmor. The codex plugin installs a narrow AppArmor profile inside the sandbox that allows them only for Codex's bundled `bwrap`.
 
 ### Credentials
 

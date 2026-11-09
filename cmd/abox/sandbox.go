@@ -149,16 +149,21 @@ func execIncus(args []string) error {
 
 func interactive() bool { return isTTY(os.Stdin) && isTTY(os.Stdout) }
 
-// RunAgent replaces abox with the agent running in autonomous mode.
-func (e *Env) RunAgent(name, agent, cwd string, args []string) error {
+// RunAgent replaces abox with the agent, started in the given permission mode.
+func (e *Env) RunAgent(name, agent, mode, cwd string, args []string) error {
 	ai, ok := e.Agents()[agent]
 	if !ok {
 		return e.CheckAgents([]string{agent})
 	}
+	start, ok := ai.Cmds[mode]
+	if !ok {
+		return fmt.Errorf("agent '%s' has no '%s' mode (AGENT_CMD_%s missing in its agent.conf)", agent, mode, strings.ToUpper(mode))
+	}
 	if !contains(e.getList(name, "user.abox.agents"), agent) {
 		return fmt.Errorf("agent '%s' is not installed in %s (abox agent add %s)", agent, name, agent)
 	}
-	cmd := "exec " + ai.Cmd
+	info("starting %s in %s mode", agent, mode)
+	cmd := "exec " + start
 	if len(args) > 0 {
 		cmd += " " + shqJoin(args)
 	}

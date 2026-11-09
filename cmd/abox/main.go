@@ -61,7 +61,8 @@ var (
 	valueFlags = map[string]bool{"--project": true, "--name": true, "--image": true, "--cpus": true,
 		"--memory": true, "--disk": true, "--agent": true}
 	boolFlags = map[string]bool{"--yes": true, "--all": true, "--vm": true, "--container": true,
-		"--no-create": true, "--keep-sandbox": true, "--help": true, "--version": true, "--distro-incus": true}
+		"--no-create": true, "--keep-sandbox": true, "--help": true, "--version": true, "--distro-incus": true,
+		"--ask": true, "--auto": true, "--bypass": true}
 )
 
 func (a *Args) Has(f string) bool   { _, ok := a.Flags[f]; return ok }
@@ -132,7 +133,7 @@ var commandOrder = []string{"run", "agents", "agent", "shell", "root", "exec", "
 
 func init() {
 	commands = map[string]*command{
-		"run":        {run: cmdRun, usage: "run [agent] [-y] [-- agent args]", help: "run an agent (default command; default agent). Shortcut: abox <agent>", flags: []string{"--yes"}, maxPos: 1, rest: true},
+		"run":        {run: cmdRun, usage: "run [agent] [--ask|--auto|--bypass] [-y] [-- agent args]", help: "run an agent (default command; default agent). Shortcut: abox <agent>", flags: []string{"--yes", "--ask", "--auto", "--bypass"}, maxPos: 1, rest: true},
 		"agents":     {run: cmdAgents, usage: "agents", help: "list available agents (and which this project uses) + auth hints"},
 		"agent":      {run: cmdAgent, usage: "agent add|rm|default|update <agent...>", help: "manage this project's agents", minPos: 1, maxPos: 99},
 		"shell":      {run: cmdShell, usage: "shell", help: "login shell in the sandbox (same subdir)"},
@@ -179,6 +180,8 @@ examples:
   abox                         # in a project dir: register (once), create/start sandbox, run default agent
   abox codex                   # run another agent (offers to enable it for this project)
   abox claude -- --resume      # pass arguments to the agent
+  abox set mode=ask            # permission mode: ask | auto (default) | bypass
+  abox --bypass                # one run without permission checks
   abox agents                  # available agents, which this project uses, how to log in
   abox agent default opencode  # change the project's default agent
   abox secret set OPENAI_API_KEY ~/.secrets/openai

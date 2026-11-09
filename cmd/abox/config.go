@@ -111,9 +111,18 @@ func asset(path string) string {
 
 // AgentInfo is parsed from the embedded agents/<name>/agent.conf.
 type AgentInfo struct {
-	Name, Desc, Cmd, Auth, NixPkg string
-	Install, Allowlist            string
+	Name, Desc, Auth, NixPkg string
+	Cmds                     map[string]string // permission mode -> start command
+	Install, Allowlist       string
 }
+
+// Permission modes, from most to least supervised. "auto" is the default:
+// the agent's own automatic mode (routine actions run, risky ones are checked).
+var permModes = []string{"ask", "auto", "bypass"}
+
+const defaultMode = "auto"
+
+func validMode(m string) bool { return contains(permModes, m) }
 
 var confLineRe = regexp.MustCompile(`^\s*(AGENT_[A-Z_]+)=(.*)$`)
 
@@ -126,14 +135,18 @@ func unquote(v string) string {
 }
 
 func parseAgentConf(name, conf string) AgentInfo {
-	ai := AgentInfo{Name: name}
+	ai := AgentInfo{Name: name, Cmds: map[string]string{}}
 	for _, line := range strings.Split(conf, "\n") {
 		if m := confLineRe.FindStringSubmatch(line); m != nil {
 			switch v := unquote(m[2]); m[1] {
 			case "AGENT_DESC":
 				ai.Desc = v
-			case "AGENT_CMD":
-				ai.Cmd = v
+			case "AGENT_CMD_ASK":
+				ai.Cmds["ask"] = v
+			case "AGENT_CMD_AUTO":
+				ai.Cmds["auto"] = v
+			case "AGENT_CMD_BYPASS":
+				ai.Cmds["bypass"] = v
 			case "AGENT_AUTH":
 				ai.Auth = v
 			case "AGENT_NIXPKG":
@@ -161,7 +174,7 @@ func (c *Config) Agents() map[string]AgentInfo {
 			continue
 		}
 		ai := parseAgentConf(d.Name(), string(conf))
-		if ai.Cmd == "" {
+		if len(ai.Cmds) == 0 {
 			continue
 		}
 		ai.Install = string(inst)

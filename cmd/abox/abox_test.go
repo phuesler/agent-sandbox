@@ -102,11 +102,11 @@ func TestRegistryRoundTrip(t *testing.T) {
 }
 
 func TestParseSettings(t *testing.T) {
-	s, err := parseSettings([]string{"cpus=8", "memory=", "type=vm"})
-	if err != nil || len(s) != 3 {
+	s, err := parseSettings([]string{"cpus=8", "memory=", "type=vm", "mode=bypass"})
+	if err != nil || len(s) != 4 {
 		t.Fatalf("%v %v", s, err)
 	}
-	for _, bad := range [][]string{{"cpus=8", "type=banana"}, {"cpus=0"}, {"cpus=x"}, {"path=/x"}, {"nokey"}, {"image=arch"}} {
+	for _, bad := range [][]string{{"mode=yolo"}, {"cpus=8", "type=banana"}, {"cpus=0"}, {"cpus=x"}, {"path=/x"}, {"nokey"}, {"image=arch"}} {
 		if _, err := parseSettings(bad); err == nil {
 			t.Errorf("parseSettings(%v) accepted", bad)
 		}
@@ -115,7 +115,7 @@ func TestParseSettings(t *testing.T) {
 	for _, x := range s {
 		applySetting(pr, x)
 	}
-	if pr.CPUs != 8 || pr.Memory != "" || pr.Type != "vm" {
+	if pr.CPUs != 8 || pr.Memory != "" || pr.Type != "vm" || pr.Mode != "bypass" {
 		t.Fatalf("apply: %+v", pr)
 	}
 }
@@ -178,14 +178,22 @@ func TestEmbeddedAgents(t *testing.T) {
 	ag := c.Agents()
 	for _, n := range []string{"claude", "codex", "opencode", "gemini"} {
 		a, ok := ag[n]
-		if !ok || a.Cmd == "" || a.Desc == "" || a.Install == "" || a.Allowlist == "" || a.NixPkg == "" {
+		if !ok || a.Desc == "" || a.Install == "" || a.Allowlist == "" || a.NixPkg == "" {
 			t.Errorf("agent %s incomplete: %+v", n, a)
+		}
+		for _, m := range permModes {
+			if a.Cmds[m] == "" {
+				t.Errorf("agent %s has no %s mode", n, m)
+			}
+		}
+		if strings.Contains(a.Cmds["auto"], "dangerously") || strings.Contains(a.Cmds["auto"], "yolo") {
+			t.Errorf("agent %s: auto mode must not bypass permissions: %s", n, a.Cmds["auto"])
 		}
 	}
 	if c.CheckAgents([]string{"claude", "nope"}) == nil {
 		t.Error("CheckAgents accepted unknown agent")
 	}
-	if got := parseAgentConf("x", "# c\nAGENT_DESC=\"A # b\"\nAGENT_CMD='x --y'\n"); got.Desc != "A # b" || got.Cmd != "x --y" {
+	if got := parseAgentConf("x", "# c\nAGENT_DESC=\"A # b\"\nAGENT_CMD_AUTO='x --y'\n"); got.Desc != "A # b" || got.Cmds["auto"] != "x --y" || got.Cmds["ask"] != "" {
 		t.Errorf("parseAgentConf: %+v", got)
 	}
 }
@@ -298,5 +306,29 @@ func TestParseInstancesAgents(t *testing.T) {
 	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{"user.abox.agents":"claude,codex","user.abox.secrets":""}}]`, "10.88.0.")
 	if !reflect.DeepEqual(m["a"].Agents, []string{"claude", "codex"}) || len(m["a"].Secrets) != 0 {
 		t.Errorf("%+v", m["a"])
+	}
+}
+
+func TestModes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := &App{reg: &Registry{Projects: map[string]*Project{"p": {Path: "/p"}, "q": {Path: "/q", Mode: "ask"}}}}
+	if a.modeOf("p") != "auto" || a.modeOf("q") != "ask" {
+		t.Errorf("default modes: %s %s", a.modeOf("p"), a.modeOf("q"))
+	}
+	a.reg.Defaults.Mode = "bypass"
+	if a.modeOf("p") != "bypass" || a.modeOf("q") != "ask" {
+		t.Errorf("defaults.mode not applied")
+	}
+	os.MkdirAll(filepath.Dir(registryPath()), 0o755)
+	os.WriteFile(registryPath(), []byte("[projects.p]\npath = \"/p\"\nmode = \"yolo\"\n"), 0o644)
+	if _, err := loadRegistry(); err == nil {
+		t.Error("invalid mode accepted")
+	}
+	args, err := parseArgs([]string{"codex", "--bypass", "--", "--help"})
+	if err != nil || !args.Has("--bypass") || args.Rest[0] != "--help" {
+		t.Errorf("flags: %+v %v", args, err)
+	}
+	if err := run([]string{"run", "--ask", "--bypass"}); err == nil {
+		t.Error("conflicting mode flags accepted")
 	}
 }

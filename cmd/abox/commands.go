@@ -36,10 +36,20 @@ func cmdRun(a *App) error {
 			return err
 		}
 	}
+	mode, overrides := a.modeOf(name), 0
+	for _, m := range permModes { // one-off override: --ask / --auto / --bypass
+		if a.args.Has("--" + m) {
+			mode = m
+			overrides++
+		}
+	}
+	if overrides > 1 {
+		return usageErr{fmt.Errorf("--ask, --auto and --bypass are mutually exclusive")}
+	}
 	if err := a.ensure(name, agentsLenient, agent); err != nil {
 		return err
 	}
-	return e.RunAgent(name, agent, workdir(rel), a.args.Rest)
+	return e.RunAgent(name, agent, mode, workdir(rel), a.args.Rest)
 }
 
 func cmdAgents(a *App) error {
@@ -357,7 +367,7 @@ func cmdLs(a *App) error {
 		fmt.Println("no projects yet - run `abox` inside a project directory")
 		return nil
 	}
-	hdr := []string{"NAME", "TYPE", "IMAGE", "AGENTS", "STATE", "IP", "EGRESS", "SNAPS", "PATH"}
+	hdr := []string{"NAME", "TYPE", "IMAGE", "AGENTS", "MODE", "STATE", "IP", "EGRESS", "SNAPS", "PATH"}
 	rows := [][]string{}
 	unregistered := false
 	for _, n := range sortedKeys(names) {
@@ -365,32 +375,32 @@ func cmdLs(a *App) error {
 		inst, hasInst := insts[n]
 		row := make([]string, len(hdr))
 		row[0] = n
-		agents := []string{}
+		agents, mode := []string{}, "-"
 		if isReg {
-			agents = a.agentsOf(n)
+			agents, mode = a.agentsOf(n), a.modeOf(n)
 		} else {
 			row[0] += " *"
 			unregistered = true
 			pr = &Project{Path: inst.Path, Type: inst.Type, Image: inst.Image}
 			agents = inst.Agents
 		}
-		row[1], row[2], row[3], row[4], row[8] = pr.Type, pr.Image, strings.Join(agents, ","), "absent", pr.Path
-		row[6] = "-"
+		row[1], row[2], row[3], row[4], row[5], row[9] = pr.Type, pr.Image, strings.Join(agents, ","), mode, "absent", pr.Path
+		row[7] = "-"
 		if hasInst {
-			row[1], row[4], row[5], row[7] = inst.Type, inst.Status, inst.IP, strconv.Itoa(inst.Snaps)
+			row[1], row[5], row[6], row[8] = inst.Type, inst.Status, inst.IP, strconv.Itoa(inst.Snaps)
 			if inst.IP != "" {
 				switch st, ok := egress[inst.IP]; {
 				case egress == nil:
-					row[6] = "?"
+					row[7] = "?"
 				case ok:
-					row[6] = st
+					row[7] = st
 				default:
-					row[6] = "allowlist"
+					row[7] = "allowlist"
 				}
 			}
 		}
-		if home != "" && strings.HasPrefix(row[8], home+"/") {
-			row[8] = "~" + row[8][len(home):]
+		if home != "" && strings.HasPrefix(row[9], home+"/") {
+			row[9] = "~" + row[9][len(home):]
 		}
 		rows = append(rows, row)
 	}
@@ -412,11 +422,14 @@ func cmdLs(a *App) error {
 		for i, x := range r {
 			line[i] = pad(x, w[i])
 		}
-		if c, ok := stateColor[r[4]]; ok {
-			line[4] = color(c, line[4])
+		if r[4] == "bypass" {
+			line[4] = color("1;33", line[4])
 		}
-		if strings.HasPrefix(r[6], "open") {
-			line[6] = color("1;31", line[6])
+		if c, ok := stateColor[r[5]]; ok {
+			line[5] = color(c, line[5])
+		}
+		if strings.HasPrefix(r[7], "open") {
+			line[7] = color("1;31", line[7])
 		}
 		fmt.Println(strings.TrimRight(strings.Join(line, "  "), " "))
 	}
@@ -433,7 +446,7 @@ func cmdStatus(a *App) error {
 	}
 	pr := a.reg.Projects[name]
 	fmt.Println(bold(name))
-	kv := [][2]string{{"path", pr.Path}, {"type", pr.Type}, {"image", pr.Image},
+	kv := [][2]string{{"path", pr.Path}, {"mode", a.modeOf(name)}, {"type", pr.Type}, {"image", pr.Image},
 		{"agents", strings.Join(a.agentsOf(name), ", ") + " (first = default)"}, {"memory", pr.Memory}, {"disk", pr.Disk}}
 	for _, k := range sortedKeys(pr.Secrets) {
 		kv = append(kv, [2]string{"secret", k + " <- " + pr.Secrets[k]})
@@ -602,7 +615,7 @@ func cmdRm(a *App) error {
 }
 
 var (
-	settable   = []string{"type", "image", "cpus", "memory", "disk"}
+	settable   = []string{"mode", "type", "image", "cpus", "memory", "disk"}
 	liveKeys   = map[string]string{"cpus": "limits.cpu", "memory": "limits.memory"}
 	rebuildKey = map[string]bool{"type": true, "image": true, "disk": true}
 )
@@ -622,6 +635,10 @@ func parseSettings(pairs []string) ([]setting, error) {
 			return nil, fmt.Errorf("bad setting '%s' (keys: %s)", kv, strings.Join(settable, ", "))
 		}
 		switch k {
+		case "mode":
+			if v != "" && !validMode(v) {
+				return nil, fmt.Errorf("mode must be one of: %s", strings.Join(permModes, ", "))
+			}
 		case "type":
 			if v != "container" && v != "vm" {
 				return nil, fmt.Errorf("type must be container or vm")
@@ -642,6 +659,8 @@ func parseSettings(pairs []string) ([]setting, error) {
 
 func applySetting(pr *Project, s setting) {
 	switch s.key {
+	case "mode":
+		pr.Mode = s.val
 	case "type":
 		pr.Type = s.val
 	case "image":

@@ -17,7 +17,8 @@ type Project struct {
 	Path    string            `toml:"path"`
 	Type    string            `toml:"type"`
 	Image   string            `toml:"image"`
-	Agents  []string          `toml:"agents"` // first one is the default
+	Agents  []string          `toml:"agents"`         // first one is the default
+	Mode    string            `toml:"mode,omitempty"` // permission mode: ask | auto | bypass (default auto)
 	CPUs    int               `toml:"cpus,omitempty"`
 	Memory  string            `toml:"memory,omitempty"`
 	Disk    string            `toml:"disk,omitempty"`
@@ -28,6 +29,7 @@ type Defaults struct {
 	Type   string   `toml:"type"`
 	Image  string   `toml:"image"`
 	Agents []string `toml:"agents,omitempty"` // empty: ABOX_DEFAULT_AGENTS from config.env
+	Mode   string   `toml:"mode,omitempty"`   // empty: auto
 }
 
 // Registry lives on the host (never inside a sandbox) so a sandbox cannot
@@ -73,9 +75,15 @@ func loadRegistry() (*Registry, error) {
 	if r.Defaults.Image == "" {
 		r.Defaults.Image = "ubuntu"
 	}
+	if r.Defaults.Mode != "" && !validMode(r.Defaults.Mode) {
+		return nil, fmt.Errorf("%s: [defaults] mode %q must be one of %s", p, r.Defaults.Mode, strings.Join(permModes, ", "))
+	}
 	for name, pr := range r.Projects {
 		if pr == nil || pr.Path == "" {
 			return nil, fmt.Errorf("%s: project %q has no path", p, name)
+		}
+		if pr.Mode != "" && !validMode(pr.Mode) {
+			return nil, fmt.Errorf("%s: project %q: mode %q must be one of %s", p, name, pr.Mode, strings.Join(permModes, ", "))
 		}
 		if pr.Type == "" {
 			pr.Type = r.Defaults.Type
