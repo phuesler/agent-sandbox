@@ -1,0 +1,10 @@
+description: "Agent sandbox: full VM (own kernel; modules/sysctls are the guest's business)"
+config:
+  limits.cpu: "6"
+  limits.memory: 12GiB
+devices:
+  root:
+    type: disk
+    path: /
+    pool: "@SBX_POOL@"
+    size: 60GiB

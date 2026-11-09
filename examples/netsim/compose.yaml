@@ -1,0 +1,23 @@
+# Smoke test for Compose networking inside a sandbox:
+#   a <-front-> b <-back-> c     (a cannot reach c; back is internal, no egress)
+services:
+  a:
+    image: nicolaka/netshoot
+    command: sleep infinity
+    cap_add: [NET_ADMIN]
+    networks: [front]
+  b:
+    image: nicolaka/netshoot
+    command: sleep infinity
+    cap_add: [NET_ADMIN]
+    networks: [front, back]
+  c:
+    image: nicolaka/netshoot
+    command: sleep infinity
+    cap_add: [NET_ADMIN]
+    networks: [back]
+
+networks:
+  front: {}
+  back:
+    internal: true

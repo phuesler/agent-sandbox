@@ -1,0 +1,46 @@
+# Domains sandboxes may reach through the egress proxy (squid dstdomain format).
+#   .example.com   -> example.com and all subdomains
+#   example.com    -> exactly that host
+# Overlapping entries are pruned automatically by apply.sh.
+# Agent-specific domains live in agents/<name>/allowlist.txt and are merged in
+# for every agent enabled in config.env (SBX_AGENTS_ENABLED).
+# Apply changes with:  sudo ./egress/apply.sh
+# See what got blocked: sbx net log
+
+# --- Ubuntu ---
+.ubuntu.com
+.launchpadcontent.net
+.snapcraft.io
+
+# --- Docker ---
+.docker.com
+.docker.io
+
+# --- GitHub ---
+.github.com
+.githubusercontent.com
+ghcr.io
+
+# --- Other registries / language ecosystems ---
+.quay.io
+registry.k8s.io
+registry.npmjs.org
+.nodejs.org
+deb.nodesource.com
+pypi.org
+files.pythonhosted.org
+proxy.golang.org
+sum.golang.org
+crates.io
+static.crates.io
+index.crates.io
+static.rust-lang.org
+
+# --- NixOS ---
+cache.nixos.org
+channels.nixos.org
+releases.nixos.org
+
+# --- Optional (uncomment as needed) ---
+# .sentry.io
+# .gitlab.com

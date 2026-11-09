@@ -1,0 +1,97 @@
+description: "Agent sandbox: Ubuntu base (cloud-init: agent user, egress proxy, Docker; agents installed by sbx)"
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    users:
+      - name: @SBX_GUEST_USER@
+        uid: @SBX_UID@
+        shell: /bin/bash
+        lock_passwd: true
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+    apt:
+      http_proxy: @SBX_PROXY_URL@
+      https_proxy: @SBX_PROXY_URL@
+    write_files:
+      - path: /etc/profile.d/00-sbx-proxy.sh
+        permissions: "0644"
+        content: |
+          # Egress goes through the host's allowlisting proxy; direct traffic is dropped.
+          export http_proxy=@SBX_PROXY_URL@ https_proxy=@SBX_PROXY_URL@
+          export HTTP_PROXY=@SBX_PROXY_URL@ HTTPS_PROXY=@SBX_PROXY_URL@
+          export no_proxy=@SBX_NO_PROXY@ NO_PROXY=@SBX_NO_PROXY@
+      - path: /etc/docker/daemon.json
+        permissions: "0644"
+        content: |
+          {
+            "proxies": {
+              "http-proxy": "@SBX_PROXY_URL@",
+              "https-proxy": "@SBX_PROXY_URL@",
+              "no-proxy": "@SBX_NO_PROXY@"
+            }
+          }
+      - path: /etc/sysctl.d/90-sbx.conf
+        permissions: "0644"
+        content: |
+          net.ipv4.ip_forward = 1
+          fs.inotify.max_user_watches = 524288
+          fs.inotify.max_user_instances = 1024
+      - path: /usr/local/lib/sbx/ensure-node
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          # Installs Node.js 22 (NodeSource) once; used by npm-based agents (codex, gemini).
+          set -euo pipefail
+          if command -v node >/dev/null && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ]; then exit 0; fi
+          . /etc/profile.d/00-sbx-proxy.sh
+          export DEBIAN_FRONTEND=noninteractive
+          curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+          bash /tmp/nodesource_setup.sh
+          apt-get install -y nodejs
+      - path: /usr/local/lib/sbx/provision.sh
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          set -euxo pipefail
+          . /etc/profile.d/00-sbx-proxy.sh
+          export DEBIAN_FRONTEND=noninteractive
+          sysctl --system || true   # some keys are read-only in containers
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          . /etc/os-release
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+            > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          usermod -aG docker @SBX_GUEST_USER@
+          systemctl restart docker
+          mkdir -p /var/lib/sbx
+          date -Is > /var/lib/sbx/provisioned
+    package_update: true
+    packages:
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - jq
+      - unzip
+      - build-essential
+      - iproute2
+      - iptables
+      - iputils-ping
+      - dnsutils
+      - tcpdump
+      - netcat-openbsd
+      - bridge-utils
+    runcmd:
+      - [bash, /usr/local/lib/sbx/provision.sh]
+devices:
+  root:
+    type: disk
+    path: /
+    pool: "@SBX_POOL@"
+    size: 40GiB
+  eth0:
+    type: nic
+    name: eth0
+    network: "@SBX_BRIDGE@"

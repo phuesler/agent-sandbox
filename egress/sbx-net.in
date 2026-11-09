@@ -1,0 +1,53 @@
+#!/bin/bash
+# Root helper installed to /usr/local/sbin/sbx-net (callable via sudo without password).
+# Toggles unrestricted egress for a single sandbox IP.
+set -euo pipefail
+
+OPEN=/etc/sbx/open-clients
+PREFIX="@SBX_NET_PREFIX@"
+LOG=/var/log/sbx-proxy/access.log
+
+usage() { echo "usage: sbx-net open <ip> [minutes] | close <ip> | status" >&2; exit 2; }
+
+valid_ip() {
+  local re="^${PREFIX//./\\.}\\.([0-9]{1,3})$"
+  [[ $1 =~ $re ]] && (( BASH_REMATCH[1] >= 2 && BASH_REMATCH[1] <= 254 )) \
+    || { echo "sbx-net: refusing IP '$1' (not a sandbox address)" >&2; exit 1; }
+}
+unit_for() { echo "sbx-net-close-${1//./-}"; }
+
+reload_proxy() { systemctl reload sbx-proxy.service; }
+
+case "${1:-}" in
+  open)
+    ip=${2:-}; min=${3:-@SBX_NET_OPEN_MINUTES@}
+    valid_ip "$ip"
+    [[ $min =~ ^[0-9]+$ ]] && (( min >= 1 && min <= 1440 )) || { echo "minutes must be 1..1440" >&2; exit 1; }
+    grep -qxF "$ip" "$OPEN" || echo "$ip" >> "$OPEN"
+    reload_proxy
+    nft delete element inet sbx open4 "{ $ip }" 2>/dev/null || true
+    nft add element inet sbx open4 "{ $ip timeout ${min}m }"
+    unit=$(unit_for "$ip")
+    systemctl stop "$unit.timer" 2>/dev/null || true
+    systemctl reset-failed "$unit.service" "$unit.timer" 2>/dev/null || true
+    systemd-run --quiet --unit "$unit" --on-active="${min}m" /usr/local/sbin/sbx-net close "$ip"
+    echo "egress OPEN for $ip for ${min} minutes"
+    ;;
+  close)
+    ip=${2:-}; valid_ip "$ip"
+    if grep -qxF "$ip" "$OPEN"; then
+      tmp=$(mktemp); grep -vxF "$ip" "$OPEN" > "$tmp" || true
+      install -m 0644 "$tmp" "$OPEN"; rm -f "$tmp"
+      reload_proxy
+    fi
+    nft delete element inet sbx open4 "{ $ip }" 2>/dev/null || true
+    unit=$(unit_for "$ip")
+    systemctl stop "$unit.timer" 2>/dev/null || true
+    echo "egress CLOSED for $ip (allowlist only)"
+    ;;
+  status)
+    echo "# proxy open clients"; grep -vE '^(#|192\.0\.2\.)' "$OPEN" || true
+    echo "# firewall open set"; nft list set inet sbx open4 | sed -n '/elements/,/}/p'
+    ;;
+  *) usage ;;
+esac

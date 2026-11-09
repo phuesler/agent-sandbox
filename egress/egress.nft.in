@@ -1,0 +1,37 @@
+#!/usr/sbin/nft -f
+# Rendered to /etc/sbx/egress.nft by egress/apply.sh, loaded by sbx-egress.service.
+# Guests on @SBX_BRIDGE@ may only talk to: each other, the host's DNS/DHCP, and the proxy.
+# `sbx net open` adds a guest IP to @open4 (with timeout) to allow direct internet access.
+
+table inet sbx
+delete table inet sbx
+
+table inet sbx {
+  set open4 {
+    type ipv4_addr
+    flags timeout
+  }
+
+  set private4 {
+    type ipv4_addr
+    flags interval
+    elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 }
+  }
+
+  chain input {
+    type filter hook input priority filter - 10; policy accept;
+    iifname "@SBX_BRIDGE@" ct state established,related accept
+    iifname "@SBX_BRIDGE@" meta l4proto { icmp, ipv6-icmp } accept
+    iifname "@SBX_BRIDGE@" udp dport { 53, 67 } accept
+    iifname "@SBX_BRIDGE@" tcp dport { 53, @SBX_PROXY_PORT@ } accept
+    iifname "@SBX_BRIDGE@" counter drop
+  }
+
+  chain forward {
+    type filter hook forward priority filter - 10; policy accept;
+    iifname "@SBX_BRIDGE@" oifname "@SBX_BRIDGE@" accept
+    iifname "@SBX_BRIDGE@" ip daddr @private4 counter drop
+    iifname "@SBX_BRIDGE@" ip saddr @open4 accept
+    iifname "@SBX_BRIDGE@" counter drop
+  }
+}

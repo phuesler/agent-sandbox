@@ -1,0 +1,6 @@
+.opencode.ai
+models.dev
+.anthropic.com
+.openai.com
+openrouter.ai
+generativelanguage.googleapis.com

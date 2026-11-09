@@ -1,0 +1,15 @@
+[Unit]
+Description=Agent sandbox egress proxy (squid, domain allowlist)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/squid -k parse -f /etc/sbx/squid.conf
+ExecStart=/usr/sbin/squid -N -f /etc/sbx/squid.conf
+ExecReload=/usr/sbin/squid -k reconfigure -f /etc/sbx/squid.conf
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

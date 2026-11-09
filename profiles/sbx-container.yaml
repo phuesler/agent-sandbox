@@ -1,0 +1,11 @@
+description: "Agent sandbox: unprivileged system container with nested Docker"
+config:
+  # Docker inside an unprivileged container
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
+  # Containers share the host kernel: load what Docker / Compose networks / tc netem need
+  linux.kernel_modules: overlay,br_netfilter,ip_tables,ip6_tables,iptable_nat,iptable_filter,nf_nat,xt_conntrack,xt_MASQUERADE,xt_addrtype,sch_netem,veth,vxlan
+  limits.cpu: "4"
+  limits.memory: 8GiB
+devices: {}

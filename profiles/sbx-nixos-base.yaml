@@ -1,0 +1,12 @@
+description: "Agent sandbox: NixOS base (no cloud-init; sbx pushes nixos/sbx.nix and rebuilds)"
+config: {}
+devices:
+  root:
+    type: disk
+    path: /
+    pool: "@SBX_POOL@"
+    size: 40GiB
+  eth0:
+    type: nic
+    name: eth0
+    network: "@SBX_BRIDGE@"
