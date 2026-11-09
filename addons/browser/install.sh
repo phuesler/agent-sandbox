@@ -24,6 +24,10 @@ if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v google-chrome >/dev/null; the
   rm -f /tmp/google-chrome.deb
 fi
 
+# The base image build only preinstalls the binaries; registering the MCP server
+# with the agents happens per project (abox addon add browser).
+[[ ${ABOX_ADDON_PHASE:-} == binaries ]] && exit 0
+
 # Headless, in-memory profile; external pages go through the egress proxy
 # (allowlist applies), the app under test on localhost is reached directly.
 args=(--headless --isolated --browser chrome --output-dir /tmp/playwright-mcp)

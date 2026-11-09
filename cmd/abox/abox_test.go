@@ -407,6 +407,18 @@ func TestImageHash(t *testing.T) {
 	if h == e.imageHash("container") {
 		t.Error("changed agent installer must change the hash")
 	}
+	h2 := e.imageHash("container")
+	c.addons["browser"] = AddonInfo{Name: "browser", Install: "changed"}
+	if h2 == e.imageHash("container") {
+		t.Error("changed add-on installer must change the hash")
+	}
+	if got := e.imageAddons(); len(got) != 1 || got[0] != "browser" {
+		t.Errorf("default image add-ons: %v", got)
+	}
+	c.ImageAddons = []string{"none"}
+	if len(e.imageAddons()) != 0 {
+		t.Error(`ABOX_IMAGE_ADDONS="none" must disable add-ons`)
+	}
 	c.ImageAgents = []string{"claude"}
 	if got := e.imageAgents(); len(got) != 1 || got[0] != "claude" {
 		t.Errorf("ABOX_IMAGE_AGENTS ignored: %v", got)

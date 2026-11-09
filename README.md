@@ -103,12 +103,13 @@ Create `agents/<name>/` with three files (see `agents/README.md`), rebuild with 
 
 ## Fast sandbox creation: the base image
 
-New Ubuntu sandboxes are copy-on-write clones of a local base image (`abox-base-container`, or `abox-base-vm` for VMs). The image already contains the OS packages, Docker, Node and the agents. Creating a sandbox takes about 5 seconds instead of several minutes.
+New Ubuntu sandboxes are copy-on-write clones of a local base image (`abox-base-container`, or `abox-base-vm` for VMs). The image already contains the OS packages, Docker, Node and the agents. Creating a sandbox takes about 5 seconds instead of several minutes. The image is about 1.2 GB; clones share it copy-on-write.
 
-- The image is built automatically by the first `abox add` (about 4 minutes, once per sandbox type). It's rebuilt automatically when abox or its settings change, because the image records a hash of everything it was built from.
+- The image is built automatically by the first `abox add` (about 7 minutes, once per sandbox type). It's rebuilt automatically when abox or its settings change, because the image records a hash of everything it was built from.
 - `abox image ls` shows its age and status. `abox image build [--vm]` rebuilds it to pick up package and agent updates; `abox doctor` reminds you after 14 days.
 - The image never contains a project, secrets or agent logins. It's built from a fresh sandbox, and per-instance state (machine ID, SSH host keys, cloud-init state, logs, caches) is reset so every clone gets its own identity.
-- `ABOX_IMAGE_AGENTS` in `/etc/abox/config.env` limits which agents are preinstalled (empty means all). Add-ons are not part of the image; they are installed per project.
+- `ABOX_IMAGE_AGENTS` in `/etc/abox/config.env` limits which agents are preinstalled (empty means all).
+- Add-on binaries are preinstalled too (`ABOX_IMAGE_ADDONS`, empty means all, `none` means none), but add-ons stay opt-in. Without `abox addon add browser`, no agent gets a browser tool. Enabling it only registers the tool, which takes a few seconds instead of minutes.
 - NixOS sandboxes are still provisioned from scratch.
 
 ## Web apps: browser and port forwarding

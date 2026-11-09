@@ -29,6 +29,17 @@ func (e *Env) imageAgents() []string {
 	return sortedKeys(e.Agents())
 }
 
+// imageAddons: add-ons whose binaries are preinstalled in the base image.
+func (e *Env) imageAddons() []string {
+	switch {
+	case len(e.Cfg.ImageAddons) == 1 && e.Cfg.ImageAddons[0] == "none":
+		return nil
+	case len(e.Cfg.ImageAddons) > 0:
+		return e.Cfg.ImageAddons
+	}
+	return sortedKeys(e.Cfg.Addons())
+}
+
 // imageHash fingerprints everything the image is built from; a different hash
 // means the image is outdated and gets rebuilt.
 func (e *Env) imageHash(typ string) string {
@@ -37,6 +48,9 @@ func (e *Env) imageHash(typ string) string {
 	h.Write([]byte(e.Cfg.render(asset("profiles/abox-base.yaml"), e.UID)))
 	for _, a := range e.imageAgents() {
 		fmt.Fprintf(h, "\nagent %s\n%s", a, e.Agents()[a].Install)
+	}
+	for _, a := range e.imageAddons() {
+		fmt.Fprintf(h, "\naddon %s\n%s", a, e.Cfg.Addons()[a].Install)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
@@ -163,6 +177,20 @@ func (e *Env) BuildImage(typ string) error {
 			return fmt.Errorf("base image: %v", err)
 		}
 	}
+	addons := e.imageAddons()
+	if err := e.Cfg.CheckAddons(addons); err != nil {
+		return fmt.Errorf("ABOX_IMAGE_ADDONS: %v", err)
+	}
+	for _, ad := range addons {
+		info("preinstalling add-on '%s' binaries (enabled per project with `abox addon add %s`)", ad, ad)
+		script := "/tmp/abox-addon-" + ad + ".sh"
+		if err := pushFile(name, script, e.Cfg.Addons()[ad].Install, "0755"); err != nil {
+			return err
+		}
+		if err := e.asUser(name, "cd && ABOX_ADDON_PHASE=binaries bash "+script); err != nil {
+			return fmt.Errorf("base image: preinstalling add-on '%s' failed (blocked downloads show in `abox net log`)", ad)
+		}
+	}
 	info("cleaning up and publishing the base image ...")
 	// Per-instance state must not be shared by all clones: machine-id, cloud-init
 	// state (so clones run it once with the minimal abox-image config, which
@@ -184,6 +212,7 @@ rm -f /var/lib/dbus/machine-id
 		return err
 	}
 	props := []string{"abox.hash=" + e.imageHash(typ), "abox.agents=" + strings.Join(agents, ","),
+		"abox.addons=" + strings.Join(addons, ","),
 		"abox.type=" + typ, "description=abox base image (" + typ + ", agents: " + strings.Join(agents, ",") + ")"}
 	pub := append([]string{"publish", name, "--alias", imageAlias(typ), "--reuse", "--compression", "zstd"}, props...)
 	if err := runIO("incus", pub...); err != nil {
