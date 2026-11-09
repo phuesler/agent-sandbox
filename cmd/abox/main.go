@@ -138,7 +138,7 @@ func init() {
 		"agent":      {run: cmdAgent, usage: "agent add|rm|default|update <agent...>", help: "manage this project's agents", minPos: 1, maxPos: 99},
 		"addon":      {run: cmdAddon, usage: "addon ls | add|rm|update <addon...>", help: "extra tooling for agents, e.g. browser (headless Chrome)", minPos: 1, maxPos: 99},
 		"image":      {run: cmdImage, usage: "image ls | build [--vm] | rm [--vm]", help: "base image new sandboxes are cloned from (built automatically)", flags: []string{"--vm"}, minPos: 1, maxPos: 1},
-		"port":       {run: cmdPort, usage: "port [ls] | port <port>|<hostport>:<sandboxport> | port rm <port>", help: "forward localhost:<port> on this machine into the sandbox", maxPos: 2},
+		"port":       {run: cmdPort, usage: "port [ls] | port [ADDRESS|INTERFACE:][HOSTPORT:]SANDBOXPORT | port rm <spec>", help: "forward a host port (local, an interface like tailscale0, or an IP) into the sandbox", maxPos: 2},
 		"shell":      {run: cmdShell, usage: "shell", help: "login shell in the sandbox (same subdir)"},
 		"root":       {run: cmdShell, usage: "root", help: "root shell"},
 		"exec":       {run: cmdExec, usage: "exec -- <cmd...>", help: "run a command in the sandbox", rest: true},
@@ -187,6 +187,7 @@ examples:
   abox set mode=ask            # permission mode: ask | auto (default) | bypass
   abox addon add browser       # headless Chrome the agents can drive (Playwright MCP)
   abox port 3000               # open http://localhost:3000 here -> the app in the sandbox
+  abox port tailscale0:3000    # same app for your tailnet / VPN (any interface or IP, like docker -p)
   abox --bypass                # one run without permission checks
   abox agents                  # available agents, which this project uses, how to log in
   abox agent default opencode  # change the project's default agent

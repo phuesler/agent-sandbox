@@ -334,29 +334,61 @@ func TestModes(t *testing.T) {
 }
 
 func TestPorts(t *testing.T) {
-	for in, want := range map[string]Port{"3000": {3000, 3000}, "8080:3000": {8080, 3000}, " 80:8000 ": {80, 8000}} {
-		if got, err := parsePort(in); err != nil || got != want {
-			t.Errorf("parsePort(%q) = %v %v", in, got, err)
+	for in, want := range map[string]Port{
+		"3000": {"", 3000, 3000}, "8080:3000": {"", 8080, 3000}, " 80:8000 ": {"", 80, 8000},
+		"tailscale0:3000": {"tailscale0", 3000, 3000}, "wt0:8080:3000": {"wt0", 8080, 3000},
+		"100.64.1.2:8080:3000": {"100.64.1.2", 8080, 3000}, "0.0.0.0:3000": {"0.0.0.0", 3000, 3000},
+		"localhost:3000": {"127.0.0.1", 3000, 3000}, "[fd00::1]:8080:3000": {"fd00::1", 8080, 3000},
+		"[::]:3000": {"::", 3000, 3000},
+	} {
+		got, err := parsePort(in)
+		if err != nil || got != want {
+			t.Errorf("parsePort(%q) = %+v %v, want %+v", in, got, err, want)
+			continue
+		}
+		if back, err := parsePort(got.String()); err != nil || back != got { // String round-trips
+			t.Errorf("round trip %q -> %q -> %+v %v", in, got.String(), back, err)
 		}
 	}
-	for _, bad := range []string{"", "x", "0", "70000", "1:2:3", "80:"} {
+	for _, bad := range []string{"", "x", "0", "70000", "1:2:3", "80:", "a:b:c:d", "bad iface!:80", "[1.2.3.4]:80", "[fd00::1]80"} {
 		if _, err := parsePort(bad); err == nil {
 			t.Errorf("parsePort(%q) accepted", bad)
 		}
 	}
-	if (Port{3000, 3000}).String() != "3000" || (Port{8080, 3000}).String() != "8080:3000" {
-		t.Error("Port.String")
+	if (Port{"", 3000, 3000}).device() != "abox-port-3000" || (Port{"tailscale0", 3000, 3000}).device() != "abox-port-tailscale0-3000" ||
+		(Port{"100.64.1.2", 80, 8000}).device() != "abox-port-100-64-1-2-80" {
+		t.Error("device names")
 	}
-	p, ok := portFromDevice("abox-port-8080", map[string]string{"type": "proxy", "listen": "tcp:127.0.0.1:8080", "connect": "tcp:10.88.0.5:3000"})
-	if !ok || p != (Port{8080, 3000}) {
-		t.Errorf("portFromDevice: %v %v", p, ok)
+	e := &Env{Cfg: &Config{NetPrefix: "10.88.0"}}
+	for _, c := range []struct {
+		p       Port
+		typ, ip string
+		err     bool
+	}{
+		{Port{"", 1, 1}, "container", "127.0.0.1", false},
+		{Port{"", 1, 1}, "vm", "10.88.0.1", false}, // NAT can't serve 127.0.0.1
+		{Port{"127.0.0.1", 1, 1}, "vm", "", true},
+		{Port{"lo", 1, 1}, "container", "127.0.0.1", false},
+		{Port{"nonexistent0", 1, 1}, "container", "", true},
+		{Port{"fd00::1", 1, 1}, "vm", "", true},
+		{Port{"0.0.0.0", 1, 1}, "vm", "0.0.0.0", false},
+	} {
+		ip, err := e.bindIP(c.p, c.typ)
+		if (err != nil) != c.err || ip != c.ip {
+			t.Errorf("bindIP(%+v, %s) = %q %v", c.p, c.typ, ip, err)
+		}
 	}
-	if _, ok := portFromDevice("myproxy", map[string]string{"type": "proxy", "listen": "tcp:0.0.0.0:1", "connect": "tcp:127.0.0.1:1"}); ok {
-		t.Error("foreign proxy device treated as abox port")
+	vm := Instance{Type: "vm", IP: "10.88.0.106"}
+	if d, _ := e.desiredDevice(Port{"", 8080, 3000}, vm); d != (portDev{"tcp:10.88.0.1:8080", "tcp:10.88.0.106:3000"}) {
+		t.Errorf("vm device: %+v", d)
 	}
-	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{},"devices":{"abox-port-3000":{"type":"proxy","listen":"tcp:127.0.0.1:3000","connect":"tcp:127.0.0.1:3000"},"work":{"type":"disk"}}}]`, "10.88.0.")
-	if len(m["a"].Ports) != 1 || m["a"].Ports[0] != (Port{3000, 3000}) {
-		t.Errorf("instance ports: %+v", m["a"].Ports)
+	ct := Instance{Type: "container"}
+	if d, _ := e.desiredDevice(Port{"", 3000, 3000}, ct); d != (portDev{"tcp:127.0.0.1:3000", "tcp:127.0.0.1:3000"}) {
+		t.Errorf("container device: %+v", d)
+	}
+	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{},"devices":{"abox-port-3000":{"type":"proxy","listen":"tcp:127.0.0.1:3000","connect":"tcp:127.0.0.1:3000"},"work":{"type":"disk"},"myproxy":{"type":"proxy"}}}]`, "10.88.0.")
+	if len(m["a"].PortDevs) != 1 || m["a"].PortDevs["abox-port-3000"].Listen != "tcp:127.0.0.1:3000" {
+		t.Errorf("instance port devices: %+v", m["a"].PortDevs)
 	}
 }
 

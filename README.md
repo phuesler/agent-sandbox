@@ -51,6 +51,7 @@ abox ls                   # all projects: agents, state, IP, egress (open/allowl
 abox addon add browser    # headless Chrome the agents can drive (see "Web apps" below)
 abox image ls             # base image new sandboxes are cloned from (see below)
 abox port 3000            # http://localhost:3000 on this machine -> port 3000 in the sandbox
+abox port tailscale0:3000 # same app on your tailnet/VPN (any interface or IP, like docker -p)
 abox shell | root         # shell in the sandbox (same subdir) | root shell
 abox exec -- make test    # one-off command in the sandbox
 abox net open 20          # unrestricted internet for this project for 20 min (net close / net log)
@@ -120,12 +121,32 @@ Agents can check their own work in a real browser, and you can watch the same ap
 abox addon add browser    # headless Chrome + Playwright MCP server, registered with every agent
 abox port 3000            # http://localhost:3000 here -> the dev server in the sandbox
 abox port 8080:3000       # different host port
-abox port                 # list; abox port rm 3000 to stop
+abox port                 # list with URLs; abox port rm 3000 to stop
 ```
 
 - **Browser add-on:** installs Google Chrome (run headless; from `dl.google.com`, the only extra allowlist entry) and the [Playwright MCP server](https://github.com/microsoft/playwright-mcp) inside the sandbox and registers it as `playwright` with Claude, Codex, Gemini and opencode. That includes agents you add later. Agents can then navigate, click, fill in forms, read the page and take screenshots. The browser is headless and keeps no profile. It reaches the app under test on `localhost` directly. Every other site goes through the egress proxy, so the allowlist applies: an app that loads fonts or scripts from a CDN may need `abox net open` or extra allowlist entries.
-- **Port forwarding:** an Incus proxy device listening on `127.0.0.1` only, so it's never exposed to your LAN. In containers, the app can listen on `localhost`. In VMs, the forward goes to the VM's address, which `abox` pins, so the app must listen on `0.0.0.0`. Forwards are stored with the project and restored after `restore`/`rebuild`.
+- **Port forwarding:** see [Port forwarding](#port-forwarding-local-vpn-lan) below; forwards can also be bound to a VPN interface.
 - Add-ons are not available for NixOS sandboxes yet.
+
+## Port forwarding: local, VPN, LAN
+
+`abox port [ADDRESS|INTERFACE:][HOSTPORT:]SANDBOXPORT` works like `docker -p`:
+
+```bash
+abox port 3000                  # local only: 127.0.0.1:3000 (VMs: the bridge address, see below)
+abox port 8080:3000             # local only, host port 8080
+abox port tailscale0:3000       # on the current address of an interface: tailscale0, wt0 (NetBird), zt... (ZeroTier)
+abox port 100.64.1.2:8080:3000  # on a specific address ([v6addr]:... for IPv6, containers only)
+abox port 0.0.0.0:3000          # all interfaces, including your LAN (abox warns)
+abox port                       # list with URLs and state
+abox port rm tailscale0:3000    # remove (same address + host port)
+```
+
+- Forwards are Incus proxy devices, stored with the project and restored after `restore`/`rebuild`. Interface names are resolved to their current IPv4 address each time forwards are applied, so a changed VPN address is picked up. If an interface is down, that forward is skipped with a warning.
+- Who can reach a VPN-bound port is decided by that VPN: Tailscale ACLs (MagicDNS names work, e.g. `http://<host>.<tailnet>.ts.net:3000`), ZeroTier flow rules, NetBird access policies. NetBird enforces its policies with a firewall on the receiving machine, so the port must be allowed by a NetBird policy, even for connections from the host itself.
+- Sandboxes still can't reach your VPNs or LAN themselves: egress blocks private, CGNAT (Tailscale/NetBird) and RFC 1918 (ZeroTier) ranges.
+- **Containers** use a userspace proxy, so the app may listen on `localhost`.
+- **VMs** only support NAT forwards (Incus). The app must listen on `0.0.0.0`, and abox pins the VM's current address. NAT can't serve `127.0.0.1`, so a VM's local-only forward listens on the bridge address instead (`http://10.88.0.1:3000`). The firewall keeps the sandbox subnet unreachable from other interfaces, so it stays local.
 
 ## Container or VM?
 

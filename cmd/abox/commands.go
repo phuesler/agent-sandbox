@@ -453,10 +453,8 @@ func cmdStatus(a *App) error {
 	if len(pr.Addons) > 0 {
 		kv = append(kv, [2]string{"addons", strings.Join(pr.Addons, ", ")})
 	}
-	for _, ps := range pr.Ports {
-		if p, err := parsePort(ps); err == nil {
-			kv = append(kv, [2]string{"port", fmt.Sprintf("http://localhost:%d -> sandbox :%d", p.Host, p.Guest)})
-		}
+	for _, p := range a.projectPorts(name) {
+		kv = append(kv, [2]string{"port", fmt.Sprintf("%s -> sandbox :%d", p, p.Guest)})
 	}
 	for _, k := range sortedKeys(pr.Secrets) {
 		kv = append(kv, [2]string{"secret", k + " <- " + pr.Secrets[k]})
@@ -836,12 +834,15 @@ func cmdDoctor(a *App) error {
 		bad := proxyListenersOutsideBridge(e.Cfg)
 		check("egress filter listens on the bridge address only", len(bad) == 0,
 			"unexpected listeners: "+strings.Join(bad, ", ")+" (sudo abox host apply)")
-		same, err := sameFile(proxyBinary)
-		hint := "sudo abox host apply   (updates " + proxyBinary + ")"
-		if err != nil {
-			hint = proxyBinary + " not installed: sudo abox host apply"
+		// Every rebuild differs from the installed copy, even if the filter code is
+		// unchanged, so a mismatch is only a note; a missing filter is an error.
+		if same, err := sameFile(proxyBinary); err != nil {
+			check("egress filter installed", false, proxyBinary+" not installed: sudo abox host apply")
+		} else if !same {
+			fmt.Println("  --  installed egress filter is from another abox build (sudo abox host apply updates it)")
+		} else {
+			check("installed egress filter matches this abox", true, "")
 		}
-		check("installed egress filter matches this abox", err == nil && same, hint)
 	}
 	check("abox-net usable via sudo", egressStatus() != nil, "sudo abox host apply (installs the sudoers rule)")
 

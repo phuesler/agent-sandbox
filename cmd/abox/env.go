@@ -92,8 +92,8 @@ func shqJoin(args []string) string {
 type Instance struct {
 	Name, Status, Type, Path, Image, IP string
 	Snaps                               int
-	Agents, Secrets, Addons             []string // installed agents / secret names set / add-ons in the guest
-	Ports                               []Port   // active port forwards (abox-port-* devices)
+	Agents, Secrets, Addons             []string           // installed agents / secret names set / add-ons in the guest
+	PortDevs                            map[string]portDev // abox-port-* proxy devices
 }
 
 func splitList(s string) []string {
@@ -151,9 +151,10 @@ func parseInstances(js, prefix string) (map[string]Instance, error) {
 			Agents: splitList(i.Config["user.abox.agents"]), Secrets: splitList(i.Config["user.abox.secrets"]),
 			Addons: splitList(i.Config["user.abox.addons"]),
 		}
-		for _, dn := range sortedKeys(i.Devices) {
-			if p, ok := portFromDevice(dn, i.Devices[dn]); ok {
-				inst.Ports = append(inst.Ports, p)
+		inst.PortDevs = map[string]portDev{}
+		for dn, d := range i.Devices {
+			if strings.HasPrefix(dn, "abox-port-") && d["type"] == "proxy" {
+				inst.PortDevs[dn] = portDev{Listen: d["listen"], Connect: d["connect"]}
 			}
 		}
 		if i.Type == "virtual-machine" {

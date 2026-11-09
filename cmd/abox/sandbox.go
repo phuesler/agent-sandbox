@@ -319,8 +319,8 @@ func (e *Env) Create(o CreateOpts) error {
 			failed = append(failed, "add-on "+a)
 		}
 	}
-	for _, p := range o.Ports {
-		if err := e.PortAdd(o.Name, p); err != nil {
+	if len(o.Ports) > 0 {
+		if err := e.SyncPorts(o.Name, o.Ports); err != nil {
 			warn("%v", err)
 		}
 	}

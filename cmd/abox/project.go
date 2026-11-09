@@ -422,12 +422,7 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 		}
 		info("creating sandbox '%s' (%s, %s, agents: %s)",
 			name, pr.Type, pr.Image, strings.Join(agents, ", "))
-		var ports []Port
-		for _, ps := range pr.Ports {
-			if p, err := parsePort(ps); err == nil {
-				ports = append(ports, p)
-			}
-		}
+		ports := a.projectPorts(name)
 		secrets := map[string]string{}
 		for k, f := range pr.Secrets {
 			secrets[k] = expandHome(f)
@@ -493,34 +488,11 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 
 // reconcilePorts makes the sandbox's port forwards match the registry.
 func (a *App) reconcilePorts(name string, inst Instance) error {
-	want := map[int]Port{}
-	for _, ps := range a.reg.Projects[name].Ports {
-		p, err := parsePort(ps)
-		if err != nil {
-			return err
-		}
-		want[p.Host] = p
+	want := a.projectPorts(name)
+	if len(want) == 0 && len(inst.PortDevs) == 0 {
+		return nil
 	}
-	have := map[int]Port{}
-	for _, p := range inst.Ports {
-		have[p.Host] = p
-	}
-	for h, p := range have {
-		if w, ok := want[h]; !ok || w != p {
-			if err := a.env.PortRm(name, p); err != nil {
-				return err
-			}
-			delete(have, h)
-		}
-	}
-	for h, p := range want {
-		if _, ok := have[h]; !ok {
-			if err := a.env.PortAdd(name, p); err != nil {
-				warn("%v", err) // e.g. host port taken: don't block running the agent
-			}
-		}
-	}
-	return nil
+	return a.env.SyncPorts(name, want)
 }
 
 // workdir maps a path inside the project to the sandbox (/work/...).

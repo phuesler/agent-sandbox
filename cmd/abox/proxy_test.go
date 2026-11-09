@@ -254,6 +254,7 @@ func TestHostFilesEgress(t *testing.T) {
 		`tcp dport 443 redirect to :3129`, `tcp dport 80 redirect to :3130`,
 		`ip saddr @open4 return`, `tcp dport { 53, 3128, 3129, 3130 } accept`,
 		`iifname != { "aboxbr0", "lo" } tcp dport { 3128, 3129, 3130 } counter drop`,
+		`iifname != { "aboxbr0", "lo" } ip daddr 10.88.0.0/24 counter drop`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("egress.nft lacks %q", want)

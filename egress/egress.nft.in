@@ -20,6 +20,14 @@ table inet abox {
     elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 }
   }
 
+  # Nothing from outside may address the sandbox subnet directly (e.g. a LAN host
+  # routing 10.88.0.0/24 via this machine). Keeps "local only" port forwards on the
+  # bridge address local; forwards bound to VPN/LAN addresses are unaffected.
+  chain guard {
+    type filter hook prerouting priority raw; policy accept;
+    iifname != { "@ABOX_BRIDGE@", "lo" } ip daddr @ABOX_NET_PREFIX@.0/24 counter drop
+  }
+
   # Transparent filtering: sandbox HTTPS/HTTP goes to the egress filter on the
   # bridge address (open sandboxes and traffic to private ranges are exempt).
   chain prerouting {
