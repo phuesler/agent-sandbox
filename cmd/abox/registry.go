@@ -17,8 +17,10 @@ type Project struct {
 	Path    string            `toml:"path"`
 	Type    string            `toml:"type"`
 	Image   string            `toml:"image"`
-	Agents  []string          `toml:"agents"`         // first one is the default
-	Mode    string            `toml:"mode,omitempty"` // permission mode: ask | auto | bypass (default auto)
+	Agents  []string          `toml:"agents"`           // first one is the default
+	Mode    string            `toml:"mode,omitempty"`   // permission mode: ask | auto | bypass (default auto)
+	Addons  []string          `toml:"addons,omitempty"` // e.g. browser
+	Ports   []string          `toml:"ports,omitempty"`  // "3000" or "8080:3000" (host:sandbox)
 	CPUs    int               `toml:"cpus,omitempty"`
 	Memory  string            `toml:"memory,omitempty"`
 	Disk    string            `toml:"disk,omitempty"`
@@ -81,6 +83,11 @@ func loadRegistry() (*Registry, error) {
 	for name, pr := range r.Projects {
 		if pr == nil || pr.Path == "" {
 			return nil, fmt.Errorf("%s: project %q has no path", p, name)
+		}
+		for _, ps := range pr.Ports {
+			if _, err := parsePort(ps); err != nil {
+				return nil, fmt.Errorf("%s: project %q: %v", p, name, err)
+			}
 		}
 		if pr.Mode != "" && !validMode(pr.Mode) {
 			return nil, fmt.Errorf("%s: project %q: mode %q must be one of %s", p, name, pr.Mode, strings.Join(permModes, ", "))

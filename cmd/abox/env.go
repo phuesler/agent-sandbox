@@ -92,7 +92,8 @@ func shqJoin(args []string) string {
 type Instance struct {
 	Name, Status, Type, Path, Image, IP string
 	Snaps                               int
-	Agents, Secrets                     []string // installed agents / secret names set in the guest
+	Agents, Secrets, Addons             []string // installed agents / secret names set / add-ons in the guest
+	Ports                               []Port   // active port forwards (abox-port-* devices)
 }
 
 func splitList(s string) []string {
@@ -118,7 +119,8 @@ type incusJSON struct {
 			} `json:"addresses"`
 		} `json:"network"`
 	} `json:"state"`
-	Snapshots []json.RawMessage `json:"snapshots"`
+	Snapshots []json.RawMessage            `json:"snapshots"`
+	Devices   map[string]map[string]string `json:"devices"`
 }
 
 func (e *Env) Instances() (map[string]Instance, error) {
@@ -147,6 +149,12 @@ func parseInstances(js, prefix string) (map[string]Instance, error) {
 			Name: i.Name, Status: strings.ToLower(i.Status), Type: "container",
 			Path: i.Config["user.abox.path"], Image: i.Config["user.abox.image"], Snaps: len(i.Snapshots),
 			Agents: splitList(i.Config["user.abox.agents"]), Secrets: splitList(i.Config["user.abox.secrets"]),
+			Addons: splitList(i.Config["user.abox.addons"]),
+		}
+		for _, dn := range sortedKeys(i.Devices) {
+			if p, ok := portFromDevice(dn, i.Devices[dn]); ok {
+				inst.Ports = append(inst.Ports, p)
+			}
 		}
 		if i.Type == "virtual-machine" {
 			inst.Type = "vm"

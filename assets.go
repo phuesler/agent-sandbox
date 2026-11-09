@@ -5,5 +5,5 @@ package agentsandbox
 
 import "embed"
 
-//go:embed config.env agents profiles egress systemd nixos
+//go:embed config.env agents addons profiles egress systemd nixos
 var Assets embed.FS

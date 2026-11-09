@@ -131,11 +131,14 @@ func (e *Env) userArgs(name, cwd, cmd string, tty bool) []string {
 	}
 	script := `export PATH="$HOME/.local/bin:$PATH"; cd ` + shq(cwd) +
 		` 2>/dev/null || cd /work 2>/dev/null || cd; [ -f ~/.abox-env ] && . ~/.abox-env; ` + cmd
-	mode := "-T"
-	if tty {
-		mode = "-t"
+	if !tty {
+		return []string{"exec", "-T", name, "--env", "PATH=" + guestPath, "--", "su", "-l", e.Cfg.GuestUser, "-c", script}
 	}
-	return []string{"exec", mode, name, "--env", "PATH=" + guestPath, "--", "su", "-l", e.Cfg.GuestUser, "-c", script}
+	// Interactive: `su --pty` gives the command its own terminal session, otherwise
+	// shells have no job control ("cannot set terminal process group"). NixOS' su
+	// has no --pty, hence the fallback.
+	wrapper := `if su --help 2>&1 | grep -q -- --pty; then exec su --pty -l "$1" -c "$2"; else exec su -l "$1" -c "$2"; fi`
+	return []string{"exec", "-t", name, "--env", "PATH=" + guestPath, "--", "sh", "-c", wrapper, "sh", e.Cfg.GuestUser, script}
 }
 
 // execIncus replaces the abox process with incus (interactive sessions).
@@ -208,7 +211,8 @@ func (e *Env) InitProfiles() error {
 type CreateOpts struct {
 	Name, Path, Type, Image, Memory, Disk string
 	CPUs                                  int
-	Agents                                []string
+	Agents, Addons                        []string
+	Ports                                 []Port
 	Secrets                               map[string]string // env var -> host file
 }
 
@@ -293,11 +297,22 @@ func (e *Env) Create(o CreateOpts) error {
 			failed = append(failed, a)
 		}
 	}
+	for _, a := range o.Addons { // after the agents: add-ons register themselves with them
+		if err := e.AddonInstall(o.Name, []string{a}, false); err != nil {
+			warn("%v", err)
+			failed = append(failed, "add-on "+a)
+		}
+	}
+	for _, p := range o.Ports {
+		if err := e.PortAdd(o.Name, p); err != nil {
+			warn("%v", err)
+		}
+	}
 	if err := incusQuiet("snapshot", "create", o.Name, "clean"); err != nil {
 		return err
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("sandbox ready (snapshot 'clean' taken) but these agents failed to install: %s", strings.Join(failed, ", "))
+		return fmt.Errorf("sandbox ready (snapshot 'clean' taken) but these failed to install: %s", strings.Join(failed, ", "))
 	}
 	info("ready. snapshot 'clean' taken")
 	return nil

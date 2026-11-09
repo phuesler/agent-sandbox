@@ -448,6 +448,14 @@ func cmdStatus(a *App) error {
 	fmt.Println(bold(name))
 	kv := [][2]string{{"path", pr.Path}, {"mode", a.modeOf(name)}, {"type", pr.Type}, {"image", pr.Image},
 		{"agents", strings.Join(a.agentsOf(name), ", ") + " (first = default)"}, {"memory", pr.Memory}, {"disk", pr.Disk}}
+	if len(pr.Addons) > 0 {
+		kv = append(kv, [2]string{"addons", strings.Join(pr.Addons, ", ")})
+	}
+	for _, ps := range pr.Ports {
+		if p, err := parsePort(ps); err == nil {
+			kv = append(kv, [2]string{"port", fmt.Sprintf("http://localhost:%d -> sandbox :%d", p.Host, p.Guest)})
+		}
+	}
 	for _, k := range sortedKeys(pr.Secrets) {
 		kv = append(kv, [2]string{"secret", k + " <- " + pr.Secrets[k]})
 	}
@@ -919,6 +927,8 @@ _abox() {
            else COMPREPLY=($(compgen -W "$(abox _agents 2>/dev/null)" -- "$cur")); fi ;;
     run) COMPREPLY=($(compgen -W "$(abox _agents 2>/dev/null)" -- "$cur")) ;;
     secret) [[ $COMP_CWORD -eq 2 ]] && COMPREPLY=($(compgen -W "set rm ls sync" -- "$cur")) ;;
+    addon) [[ $COMP_CWORD -eq 2 ]] && COMPREPLY=($(compgen -W "ls add rm update" -- "$cur")) || COMPREPLY=($(compgen -W "browser" -- "$cur")) ;;
+    port) [[ $COMP_CWORD -eq 2 ]] && COMPREPLY=($(compgen -W "ls rm" -- "$cur")) ;;
     add) COMPREPLY=($(compgen -d -- "$cur")) ;;
     set) COMPREPLY=($(compgen -W "type= image= cpus= memory= disk=" -- "$cur")); compopt -o nospace ;;
     *)   COMPREPLY=($(compgen -W "-p" -- "$cur")) ;;

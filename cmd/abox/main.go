@@ -128,7 +128,7 @@ type command struct {
 }
 
 var commands map[string]*command
-var commandOrder = []string{"run", "agents", "agent", "shell", "root", "exec", "add", "ls", "status", "up", "down",
+var commandOrder = []string{"run", "agents", "agent", "addon", "port", "shell", "root", "exec", "add", "ls", "status", "up", "down",
 	"snap", "restore", "rebuild", "rm", "set", "secret", "net", "import", "doctor", "edit", "host", "completion", "version"}
 
 func init() {
@@ -136,6 +136,8 @@ func init() {
 		"run":        {run: cmdRun, usage: "run [agent] [--ask|--auto|--bypass] [-y] [-- agent args]", help: "run an agent (default command; default agent). Shortcut: abox <agent>", flags: []string{"--yes", "--ask", "--auto", "--bypass"}, maxPos: 1, rest: true},
 		"agents":     {run: cmdAgents, usage: "agents", help: "list available agents (and which this project uses) + auth hints"},
 		"agent":      {run: cmdAgent, usage: "agent add|rm|default|update <agent...>", help: "manage this project's agents", minPos: 1, maxPos: 99},
+		"addon":      {run: cmdAddon, usage: "addon ls | add|rm|update <addon...>", help: "extra tooling for agents, e.g. browser (headless Chromium)", minPos: 1, maxPos: 99},
+		"port":       {run: cmdPort, usage: "port [ls] | port <port>|<hostport>:<sandboxport> | port rm <port>", help: "forward localhost:<port> on this machine into the sandbox", maxPos: 2},
 		"shell":      {run: cmdShell, usage: "shell", help: "login shell in the sandbox (same subdir)"},
 		"root":       {run: cmdShell, usage: "root", help: "root shell"},
 		"exec":       {run: cmdExec, usage: "exec -- <cmd...>", help: "run a command in the sandbox", rest: true},
@@ -181,6 +183,8 @@ examples:
   abox codex                   # run another agent (offers to enable it for this project)
   abox claude -- --resume      # pass arguments to the agent
   abox set mode=ask            # permission mode: ask | auto (default) | bypass
+  abox addon add browser       # headless Chromium the agents can drive (Playwright MCP)
+  abox port 3000               # open http://localhost:3000 here -> the app in the sandbox
   abox --bypass                # one run without permission checks
   abox agents                  # available agents, which this project uses, how to log in
   abox agent default opencode  # change the project's default agent

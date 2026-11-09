@@ -422,12 +422,19 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 		}
 		info("creating sandbox '%s' (%s, %s, agents: %s) - first time takes a few minutes",
 			name, pr.Type, pr.Image, strings.Join(agents, ", "))
+		var ports []Port
+		for _, ps := range pr.Ports {
+			if p, err := parsePort(ps); err == nil {
+				ports = append(ports, p)
+			}
+		}
 		secrets := map[string]string{}
 		for k, f := range pr.Secrets {
 			secrets[k] = expandHome(f)
 		}
 		err := e.Create(CreateOpts{Name: name, Path: pr.Path, Type: pr.Type, Image: pr.Image,
-			Memory: pr.Memory, Disk: pr.Disk, CPUs: pr.CPUs, Agents: agents, Secrets: secrets})
+			Memory: pr.Memory, Disk: pr.Disk, CPUs: pr.CPUs, Agents: agents, Secrets: secrets,
+			Addons: pr.Addons, Ports: ports})
 		if err == nil {
 			return nil
 		}
@@ -452,10 +459,12 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 			}
 		}
 	}
+	installedAgent := false
 	for _, ag := range agents {
 		if contains(inst.Agents, ag) || (policy == agentsSkip && !contains(required, ag)) {
 			continue
 		}
+		installedAgent = true
 		if err := e.AgentInstall(name, []string{ag}, false); err != nil {
 			hint := fmt.Sprintf("%v. If a domain is missing from the allowlist: add it to agents/%s/allowlist.txt, "+
 				"rebuild (make install) and run `sudo abox host apply`", err, ag)
@@ -463,6 +472,52 @@ func (a *App) ensure(name string, policy agentPolicy, required ...string) error 
 				return fmt.Errorf("%s", hint)
 			}
 			warn("%s", hint)
+		}
+	}
+	// add-ons: install missing ones; re-run all after a new agent so they register with it
+	if policy != agentsSkip {
+		for _, ad := range pr.Addons {
+			if contains(inst.Addons, ad) && !installedAgent {
+				continue
+			}
+			if err := e.AddonInstall(name, []string{ad}, false); err != nil {
+				if policy == agentsStrict {
+					return err
+				}
+				warn("%v", err)
+			}
+		}
+	}
+	return a.reconcilePorts(name, inst)
+}
+
+// reconcilePorts makes the sandbox's port forwards match the registry.
+func (a *App) reconcilePorts(name string, inst Instance) error {
+	want := map[int]Port{}
+	for _, ps := range a.reg.Projects[name].Ports {
+		p, err := parsePort(ps)
+		if err != nil {
+			return err
+		}
+		want[p.Host] = p
+	}
+	have := map[int]Port{}
+	for _, p := range inst.Ports {
+		have[p.Host] = p
+	}
+	for h, p := range have {
+		if w, ok := want[h]; !ok || w != p {
+			if err := a.env.PortRm(name, p); err != nil {
+				return err
+			}
+			delete(have, h)
+		}
+	}
+	for h, p := range want {
+		if _, ok := have[h]; !ok {
+			if err := a.env.PortAdd(name, p); err != nil {
+				warn("%v", err) // e.g. host port taken: don't block running the agent
+			}
 		}
 	}
 	return nil

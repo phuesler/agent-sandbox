@@ -332,3 +332,58 @@ func TestModes(t *testing.T) {
 		t.Error("conflicting mode flags accepted")
 	}
 }
+
+func TestPorts(t *testing.T) {
+	for in, want := range map[string]Port{"3000": {3000, 3000}, "8080:3000": {8080, 3000}, " 80:8000 ": {80, 8000}} {
+		if got, err := parsePort(in); err != nil || got != want {
+			t.Errorf("parsePort(%q) = %v %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "x", "0", "70000", "1:2:3", "80:"} {
+		if _, err := parsePort(bad); err == nil {
+			t.Errorf("parsePort(%q) accepted", bad)
+		}
+	}
+	if (Port{3000, 3000}).String() != "3000" || (Port{8080, 3000}).String() != "8080:3000" {
+		t.Error("Port.String")
+	}
+	p, ok := portFromDevice("abox-port-8080", map[string]string{"type": "proxy", "listen": "tcp:127.0.0.1:8080", "connect": "tcp:10.88.0.5:3000"})
+	if !ok || p != (Port{8080, 3000}) {
+		t.Errorf("portFromDevice: %v %v", p, ok)
+	}
+	if _, ok := portFromDevice("myproxy", map[string]string{"type": "proxy", "listen": "tcp:0.0.0.0:1", "connect": "tcp:127.0.0.1:1"}); ok {
+		t.Error("foreign proxy device treated as abox port")
+	}
+	m, _ := parseInstances(`[{"name":"a","status":"Running","type":"container","config":{},"devices":{"abox-port-3000":{"type":"proxy","listen":"tcp:127.0.0.1:3000","connect":"tcp:127.0.0.1:3000"},"work":{"type":"disk"}}}]`, "10.88.0.")
+	if len(m["a"].Ports) != 1 || m["a"].Ports[0] != (Port{3000, 3000}) {
+		t.Errorf("instance ports: %+v", m["a"].Ports)
+	}
+}
+
+func TestBrowserAddon(t *testing.T) {
+	t.Setenv("ABOX_CONFIG", filepath.Join(t.TempDir(), "none"))
+	c, _ := loadConfig()
+	b, ok := c.Addons()["browser"]
+	if !ok || b.Desc == "" || !strings.Contains(b.Install, "playwright") {
+		t.Fatalf("browser add-on: %+v", b)
+	}
+	allow, _, err := c.buildAllowlist()
+	if err != nil || !strings.Contains(allow, "cdn.playwright.dev") || !strings.Contains(allow, "playwright.download.prss.microsoft.com") {
+		t.Errorf("allowlist lacks playwright hosts: %v", err)
+	}
+	if c.CheckAddons([]string{"browser"}) != nil || c.CheckAddons([]string{"nope"}) == nil {
+		t.Error("CheckAddons")
+	}
+}
+
+func TestUserArgsPty(t *testing.T) {
+	e := &Env{Cfg: &Config{GuestUser: "agent"}}
+	tty := strings.Join(e.userArgs("n", "/work", "exec bash -l", true), " ")
+	if !strings.Contains(tty, "su --pty -l") || !strings.Contains(tty, "exec -t") {
+		t.Errorf("interactive session must use su --pty: %s", tty)
+	}
+	plain := strings.Join(e.userArgs("n", "/work", "true", false), " ")
+	if strings.Contains(plain, "--pty") || !strings.Contains(plain, "exec -T") {
+		t.Errorf("non-interactive session must not use a pty: %s", plain)
+	}
+}
