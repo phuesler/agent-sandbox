@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -20,6 +21,9 @@ import (
 const imageStaleAfter = 14 * 24 * time.Hour
 
 func imageAlias(typ string) string { return "abox-base-" + typ }
+
+// buildPrefix names temporary build instances ("abox-imgbuild-vm-1234").
+func buildPrefix(typ string) string { return "abox-imgbuild-" + typ + "-" }
 
 // imageAgents: agents preinstalled in the base image.
 func (e *Env) imageAgents() []string {
@@ -144,13 +148,40 @@ func (e *Env) ensureBaseImage(typ string) (string, []string, error) {
 
 // BuildImage provisions a temporary sandbox (no project directory, no secrets,
 // no logins), scrubs per-instance state and publishes it as the base image.
+// Callers must hold imageLock(typ).
 func (e *Env) BuildImage(typ string) error {
 	if err := e.InitProfiles(); err != nil {
 		return err
 	}
-	name := fmt.Sprintf("abox-imgbuild-%s-%04d", typ, rand.Intn(10000))
+	// We hold the build lock, so any existing build instance of this type is a
+	// leftover of an interrupted or crashed build: remove it (they are throwaway
+	// and would otherwise keep running with their full memory limit).
+	if out, _, err := capture("incus", "list", "^"+buildPrefix(typ), "-c", "n", "-f", "csv"); err == nil {
+		for _, old := range strings.Fields(out) {
+			if strings.HasPrefix(old, buildPrefix(typ)) {
+				info("removing leftover build instance %s (from an interrupted build)", old)
+				_, _, _ = capture("incus", "delete", "--force", old)
+			}
+		}
+	}
+	name := fmt.Sprintf("%s%04d", buildPrefix(typ), rand.Intn(10000))
+	agents, addons := e.imageAgents(), e.imageAddons()
+	if err := e.Cfg.CheckAddons(addons); err != nil {
+		return fmt.Errorf("ABOX_IMAGE_ADDONS: %v", err)
+	}
+	total, n := 3+len(agents)+len(addons), 0
+	step := func(format string, a ...any) {
+		n++
+		info("[%d/%d] %s", n, total, fmt.Sprintf(format, a...))
+	}
+	// Build-only speedup: dpkg normally fsyncs every file, which is very slow on
+	// VM disks backed by the btrfs loop pool. A failed build is thrown away, so
+	// unsafe I/O is fine here; the setting is removed before publishing and is
+	// never part of the image. bootcmd runs before cloud-init installs packages.
+	vendor := "#cloud-config\nbootcmd:\n  - [sh, -c, 'echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/abox-build-unsafe-io']\n"
 	args := []string{"init", e.Cfg.UbuntuImage, name, "-p", "abox-base", "-p", "abox-" + typ,
-		"-c", "user.abox.image=ubuntu"} // not user.abox=true: build instances stay out of `abox ls`
+		"-c", "user.abox.image=ubuntu", // not user.abox=true: build instances stay out of `abox ls`
+		"-c", "cloud-init.vendor-data=" + vendor}
 	if typ == "vm" {
 		args = append(args, "--vm")
 	}
@@ -158,31 +189,40 @@ func (e *Env) BuildImage(typ string) error {
 	if err := runIO("incus", args...); err != nil {
 		return err
 	}
-	defer func() { _, _, _ = capture("incus", "delete", "--force", name) }()
+	cleanup := func() { _, _, _ = capture("incus", "delete", "--force", name) }
+	defer cleanup()
+	// Ctrl-C / SIGTERM: deferred cleanup would not run, so delete the build
+	// instance here before exiting.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+	go func() {
+		if _, ok := <-sigs; ok {
+			warn("interrupted: removing build instance %s", name)
+			cleanup()
+			os.Exit(130)
+		}
+	}()
 	if err := runIO("incus", "start", name); err != nil {
 		return err
 	}
 	if err := e.WaitReady(name); err != nil {
 		return err
 	}
-	info("provisioning base image (packages, Docker) ...")
+	step("base system: packages, Docker (a few minutes)")
 	_, _, _ = capture("incus", "exec", name, "--", "cloud-init", "status", "--wait")
 	if _, _, err := capture("incus", "exec", name, "--", "test", "-f", "/var/lib/abox/provisioned"); err != nil {
 		_ = runStdin(nil, "incus", "exec", name, "--", "tail", "-n", "30", "/var/log/cloud-init-output.log")
 		return fmt.Errorf("base image provisioning failed; blocked downloads show in `abox net log`")
 	}
-	agents := e.imageAgents()
 	for _, a := range agents {
+		step("agent: %s", a)
 		if err := e.AgentInstall(name, []string{a}, false); err != nil {
 			return fmt.Errorf("base image: %v", err)
 		}
 	}
-	addons := e.imageAddons()
-	if err := e.Cfg.CheckAddons(addons); err != nil {
-		return fmt.Errorf("ABOX_IMAGE_ADDONS: %v", err)
-	}
 	for _, ad := range addons {
-		info("preinstalling add-on '%s' binaries (enabled per project with `abox addon add %s`)", ad, ad)
+		step("add-on binaries: %s (stays opt-in per project: abox addon add %s)", ad, ad)
 		script := "/tmp/abox-addon-" + ad + ".sh"
 		if err := pushFile(name, script, e.Cfg.Addons()[ad].Install, "0755"); err != nil {
 			return err
@@ -191,7 +231,7 @@ func (e *Env) BuildImage(typ string) error {
 			return fmt.Errorf("base image: preinstalling add-on '%s' failed (blocked downloads show in `abox net log`)", ad)
 		}
 	}
-	info("cleaning up and publishing the base image ...")
+	step("cleaning up (machine-id, logs, caches)")
 	// Per-instance state must not be shared by all clones: machine-id, cloud-init
 	// state (so clones run it once with the minimal abox-image config, which
 	// also regenerates SSH host keys), caches, logs, shell history.
@@ -204,6 +244,7 @@ find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' \) -delete
 find /var/log -type f -exec truncate -s 0 {} +
 cloud-init clean --logs --machine-id 2>/dev/null || { cloud-init clean --logs; truncate -s 0 /etc/machine-id; }
 rm -f /var/lib/dbus/machine-id
+rm -f /etc/dpkg/dpkg.cfg.d/abox-build-unsafe-io
 `
 	if err := runStdin(strings.NewReader(scrub), "incus", "exec", name, "--", "sh"); err != nil {
 		return fmt.Errorf("base image cleanup failed: %v", err)
@@ -211,6 +252,7 @@ rm -f /var/lib/dbus/machine-id
 	if err := runIO("incus", "stop", name); err != nil {
 		return err
 	}
+	step("publishing image %s (compressing, may take a few minutes)", imageAlias(typ))
 	props := []string{"abox.hash=" + e.imageHash(typ), "abox.agents=" + strings.Join(agents, ","),
 		"abox.addons=" + strings.Join(addons, ","),
 		"abox.type=" + typ, "description=abox base image (" + typ + ", agents: " + strings.Join(agents, ",") + ")"}

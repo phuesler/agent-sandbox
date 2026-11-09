@@ -9,6 +9,7 @@ CHROME_DEB=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64
 log=/tmp/abox-browser-install.log
 
 if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v playwright-mcp >/dev/null; then
+  echo "browser: installing Playwright MCP server"
   sudo /usr/local/lib/abox/ensure-node
   npm install -g --prefix "$HOME/.local" "$MCP_PKG@latest"
 fi
@@ -16,9 +17,11 @@ fi
 # from storage.googleapis.com, which would open all of Google Cloud Storage to
 # every sandbox). The package also adds Google's apt repo for updates.
 if [[ -n ${ABOX_AGENT_UPDATE:-} ]] || ! command -v google-chrome >/dev/null; then
+  echo "browser: downloading Google Chrome"
   if ! curl -fsSL -o /tmp/google-chrome.deb "$CHROME_DEB" 2>"$log"; then
     cat "$log" >&2; echo "Chrome download failed. Blocked hosts: abox net log" >&2; exit 1
   fi
+  echo "browser: installing Chrome and ~110 system libraries (takes a while, longest in VMs)"
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb >>"$log" 2>&1 \
     || { tail -5 "$log" >&2; exit 1; }
   rm -f /tmp/google-chrome.deb
