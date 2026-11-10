@@ -1,5 +1,7 @@
 # agent-sandbox (`abox`)
 
+[![test](https://github.com/phuesler/agent-sandbox/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/phuesler/agent-sandbox/actions/workflows/test.yml)
+
 Run coding agents (**Claude Code, Codex, opencode, Gemini CLI**, or any agent you add) inside Incus **system containers** or **VMs**, by default in each agent's own automatic permission mode. Each sandbox:
 
 - sees **only one project directory** from the host, mounted at `/work`
